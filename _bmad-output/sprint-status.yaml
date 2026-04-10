@@ -1,0 +1,94 @@
+# generated: 2026-04-06
+# last_updated: 2026-04-10
+# story_1-3_completed: 2026-04-08
+# story_1-1_created: 2026-04-06
+# project: SafeNet
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: /Users/sabri/github/recoup/_bmad-output
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - SM typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-04-06
+last_updated: 2026-04-10
+project: SafeNet
+project_key: NOKEY
+tracking_system: file-system
+story_location: /Users/sabri/github/recoup/_bmad-output
+
+development_status:
+  # Epic 1: Project Foundation & Deployable Skeleton
+  epic-1: in-progress
+  1-1-monorepo-initialization-docker-compose-ci-cd-pipeline: done
+  1-2-django-core-tenant-isolation-jwt-auth-stripe-token-encryption: done
+  1-3-decline-code-rule-engine-config-compliance-module: done
+  1-4-next-js-frontend-skeleton-design-token-system-state-management: ready-for-dev
+  epic-1-retrospective: optional
+
+  # Epic 2: Founder Onboarding & Free Tier Dashboard
+  epic-2: backlog
+  2-1-user-registration-stripe-connect-oauth: backlog
+  2-2-90-day-retroactive-scan-background-job: backlog
+  2-3-authenticated-dashboard-shell-navigation: backlog
+  2-4-failure-landscape-dashboard-kpi-cards: backlog
+  2-5-subscription-tiers-trial-mechanics-free-tier-degradation: backlog
+  epic-2-retrospective: optional
+
+  # Epic 3: Recovery Engine, Compliance & Customer Status Management
+  epic-3: backlog
+  3-1-dpa-acceptance-engine-mode-selection-flow: backlog
+  3-2-autopilot-recovery-engine-rule-execution-4-state-status-machine: backlog
+  3-3-card-update-detection-immediate-retry: backlog
+  3-4-supervised-mode-pending-action-queue-batch-approval: backlog
+  3-5-subscriber-status-cards-attention-bar: backlog
+  epic-3-retrospective: optional
+
+  # Epic 4: End-Customer Notification System
+  epic-4: backlog
+  4-1-resend-integration-branded-failure-notification-email: backlog
+  4-2-tone-selector-settings-live-notification-preview: backlog
+  4-3-final-notice-recovery-confirmation-emails: backlog
+  4-4-opt-out-mechanism-notification-suppression: backlog
+  epic-4-retrospective: optional
+
+  # Epic 5: Subscriber Detail, Analytics & Retention Emails
+  epic-5: backlog
+  5-1-subscriber-detail-panel-payment-timeline: backlog
+  5-2-fraud-flag-manual-resolution: backlog
+  5-3-recovery-analytics-month-over-month-dashboard: backlog
+  5-4-weekly-digest-email-monthly-savings-email-data-retention: backlog
+  epic-5-retrospective: optional
+
+  # Epic 6: Operator Administration Console
+  epic-6: backlog
+  6-1-operator-authentication-console-access-isolation: backlog
+  6-2-scheduled-retry-dashboard-manual-override: backlog
+  6-3-manual-status-advancement-audit-log-viewer: backlog
+  epic-6-retrospective: optional

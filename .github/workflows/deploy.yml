@@ -1,0 +1,31 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  deploy-backend:
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy backend to Railway
+        uses: railway/deploy@v1
+        with:
+          service: safenet-backend
+          token: ${{ secrets.RAILWAY_TOKEN }}
+
+  deploy-frontend:
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy frontend to Railway
+        uses: railway/deploy@v1
+        with:
+          service: safenet-frontend
+          token: ${{ secrets.RAILWAY_TOKEN }}

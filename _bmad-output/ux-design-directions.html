@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SafeNet — UX Design Directions</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: #0D0F1A; color: #F0F2F7; }
+
+  /* Nav */
+  .direction-nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: #0D0F1A; border-bottom: 1px solid #2A2D3A; padding: 0 24px; display: flex; align-items: center; gap: 8px; height: 52px; }
+  .direction-nav h1 { font-size: 13px; font-weight: 600; color: #8B8FA8; margin-right: 16px; white-space: nowrap; }
+  .nav-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid #2A2D3A; background: transparent; color: #8B8FA8; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; white-space: nowrap; font-family: inherit; }
+  .nav-btn:hover { border-color: #6B7280; color: #F0F2F7; }
+  .nav-btn.active { background: #F0F2F7; color: #0D0F1A; border-color: #F0F2F7; }
+
+  /* Direction panels */
+  .direction { display: none; padding-top: 52px; min-height: 100vh; }
+  .direction.active { display: block; }
+
+  /* ─────────────────────────────────────────────────────────────
+     DIRECTION 1 — "Hero First" (Light mode, ultra-clean)
+  ───────────────────────────────────────────────────────────── */
+  .d1 { background: #FFFFFF; color: #0D0F1A; }
+  .d1-shell { display: flex; height: calc(100vh - 52px); }
+  .d1-sidebar { width: 240px; flex-shrink: 0; border-right: 1px solid #E2E5EF; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; }
+  .d1-logo { font-size: 15px; font-weight: 700; color: #0D0F1A; padding: 4px 12px 20px; letter-spacing: -0.3px; }
+  .d1-logo span { color: #16A34A; }
+  .d1-nav-item { padding: 8px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; color: #6B7280; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 0.1s; }
+  .d1-nav-item:hover { background: #F8F9FB; color: #0D0F1A; }
+  .d1-nav-item.active { background: #F0F2F7; color: #0D0F1A; font-weight: 600; }
+  .d1-nav-icon { width: 16px; height: 16px; opacity: 0.6; }
+  .d1-engine-badge { margin-top: auto; padding: 12px; background: #F0F2F7; border-radius: 8px; }
+  .d1-engine-badge .label { font-size: 11px; font-weight: 500; color: #6B7280; margin-bottom: 4px; }
+  .d1-engine-badge .status { font-size: 13px; font-weight: 600; color: #2563EB; display: flex; align-items: center; gap: 6px; }
+  .d1-engine-badge .status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #2563EB; display: inline-block; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .d1-engine-badge .sub { font-size: 11px; color: #9CA3AF; margin-top: 3px; }
+  .d1-main { flex: 1; overflow-y: auto; padding: 40px 48px; }
+  .d1-topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 40px; }
+  .d1-greeting { font-size: 22px; font-weight: 600; color: #0D0F1A; }
+  .d1-greeting span { color: #6B7280; font-weight: 400; }
+  .d1-mode-toggle { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid #E2E5EF; border-radius: 8px; font-size: 12px; font-weight: 500; color: #6B7280; cursor: pointer; }
+  .d1-mode-toggle .dot { width: 8px; height: 8px; border-radius: 50%; background: #2563EB; }
+  .d1-hero { margin-bottom: 40px; padding: 40px 48px; background: #F8F9FB; border-radius: 12px; border: 1px solid #E2E5EF; display: flex; align-items: center; justify-content: space-between; }
+  .d1-hero-left {}
+  .d1-hero-label { font-size: 13px; font-weight: 500; color: #6B7280; margin-bottom: 8px; }
+  .d1-hero-amount { font-size: 64px; font-weight: 700; color: #16A34A; letter-spacing: -2px; line-height: 1; margin-bottom: 8px; }
+  .d1-hero-sub { font-size: 14px; color: #6B7280; }
+  .d1-hero-cta { padding: 14px 28px; background: #0F172A; color: #F0F2F7; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; font-family: inherit; }
+  .d1-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 32px; }
+  .d1-metric-card { padding: 24px; border: 1px solid #E2E5EF; border-radius: 10px; }
+  .d1-metric-card .m-label { font-size: 12px; font-weight: 500; color: #6B7280; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .d1-metric-card .m-value { font-size: 28px; font-weight: 700; color: #0D0F1A; letter-spacing: -0.5px; }
+  .d1-metric-card .m-sub { font-size: 12px; color: #9CA3AF; margin-top: 4px; }
+  .d1-metric-card.green .m-value { color: #16A34A; }
+  .d1-metric-card.blue .m-value { color: #2563EB; }
+  .d1-section-title { font-size: 15px; font-weight: 600; color: #0D0F1A; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
+  .d1-section-title .see-all { font-size: 12px; font-weight: 500; color: #6B7280; cursor: pointer; }
+  .d1-subscriber-list { border: 1px solid #E2E5EF; border-radius: 10px; overflow: hidden; }
+  .d1-subscriber-row { padding: 16px 20px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #E2E5EF; transition: background 0.1s; cursor: pointer; }
+  .d1-subscriber-row:last-child { border-bottom: none; }
+  .d1-subscriber-row:hover { background: #F8F9FB; }
+  .d1-avatar { width: 36px; height: 36px; border-radius: 50%; background: #E2E5EF; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #6B7280; flex-shrink: 0; }
+  .d1-sub-info { flex: 1; }
+  .d1-sub-name { font-size: 14px; font-weight: 500; color: #0D0F1A; }
+  .d1-sub-detail { font-size: 12px; color: #9CA3AF; margin-top: 2px; }
+  .d1-sub-amount { font-size: 14px; font-weight: 600; color: #0D0F1A; margin-right: 12px; }
+  .badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+  .badge.recovered { background: #DCFCE7; color: #16A34A; }
+  .badge.active { background: #DBEAFE; color: #2563EB; }
+  .badge.fraud { background: #FEE2E2; color: #DC2626; }
+  .badge.churn { background: #F3F4F6; color: #6B7280; }
+
+  /* ─────────────────────────────────────────────────────────────
+     DIRECTION 2 — "Command Bar" (Dark, dense, technical)
+  ───────────────────────────────────────────────────────────── */
+  .d2 { background: #0F1117; color: #F0F2F7; }
+  .d2-shell { display: flex; height: calc(100vh - 52px); }
+  .d2-sidebar { width: 220px; flex-shrink: 0; border-right: 1px solid #2A2D3A; padding: 16px 12px; display: flex; flex-direction: column; gap: 2px; }
+  .d2-logo { font-size: 14px; font-weight: 700; padding: 4px 10px 18px; letter-spacing: -0.2px; }
+  .d2-logo span { color: #22C55E; }
+  .d2-nav-item { padding: 7px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; color: #8B8FA8; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .d2-nav-item:hover { background: #1A1D27; color: #F0F2F7; }
+  .d2-nav-item.active { background: #22263A; color: #F0F2F7; }
+  .d2-sidebar-section { font-size: 10px; font-weight: 600; color: #5C6070; text-transform: uppercase; letter-spacing: 0.8px; padding: 12px 10px 4px; }
+  .d2-engine { margin-top: auto; padding: 10px; background: #1A1D27; border-radius: 8px; border: 1px solid #2A2D3A; }
+  .d2-engine .e-label { font-size: 10px; font-weight: 600; color: #5C6070; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px; }
+  .d2-engine .e-status { font-size: 12px; font-weight: 600; color: #3B82F6; display: flex; align-items: center; gap: 6px; }
+  .d2-engine .e-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #3B82F6; animation: pulse 2s infinite; }
+  .d2-engine .e-sub { font-size: 11px; color: #5C6070; margin-top: 3px; }
+  .d2-topbar { height: 48px; border-bottom: 1px solid #2A2D3A; display: flex; align-items: center; padding: 0 24px; gap: 16px; }
+  .d2-topbar-title { font-size: 14px; font-weight: 600; flex: 1; }
+  .d2-topbar-badge { padding: 4px 10px; background: #1A1D27; border: 1px solid #2A2D3A; border-radius: 6px; font-size: 11px; color: #8B8FA8; }
+  .d2-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .d2-content { flex: 1; overflow-y: auto; padding: 24px; }
+  .d2-kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .d2-kpi { padding: 16px; background: #1A1D27; border: 1px solid #2A2D3A; border-radius: 8px; }
+  .d2-kpi .k-label { font-size: 11px; font-weight: 500; color: #5C6070; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .d2-kpi .k-value { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+  .d2-kpi .k-sub { font-size: 11px; color: #5C6070; margin-top: 4px; }
+  .d2-kpi.green .k-value { color: #22C55E; }
+  .d2-kpi.blue .k-value { color: #3B82F6; }
+  .d2-kpi.white .k-value { color: #F0F2F7; }
+  .d2-body { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+  .d2-table-card { background: #1A1D27; border: 1px solid #2A2D3A; border-radius: 8px; overflow: hidden; }
+  .d2-table-header { padding: 12px 16px; border-bottom: 1px solid #2A2D3A; display: flex; align-items: center; justify-content: space-between; }
+  .d2-table-header .th-title { font-size: 13px; font-weight: 600; }
+  .d2-table-header .th-filter { padding: 4px 10px; border: 1px solid #2A2D3A; border-radius: 5px; font-size: 11px; color: #8B8FA8; cursor: pointer; background: transparent; font-family: inherit; }
+  .d2-col-headers { display: grid; grid-template-columns: 1fr 80px 90px 100px; padding: 8px 16px; border-bottom: 1px solid #1A1D27; }
+  .d2-col-headers span { font-size: 10px; font-weight: 600; color: #5C6070; text-transform: uppercase; letter-spacing: 0.5px; }
+  .d2-row { display: grid; grid-template-columns: 1fr 80px 90px 100px; padding: 10px 16px; border-bottom: 1px solid #22263A; align-items: center; cursor: pointer; transition: background 0.1s; }
+  .d2-row:hover { background: #22263A; }
+  .d2-row:last-child { border-bottom: none; }
+  .d2-row .r-name { font-size: 13px; font-weight: 500; }
+  .d2-row .r-sub { font-size: 11px; color: #5C6070; margin-top: 1px; }
+  .d2-row .r-amount { font-size: 13px; font-weight: 600; color: #F0F2F7; }
+  .d2-side-card { background: #1A1D27; border: 1px solid #2A2D3A; border-radius: 8px; padding: 16px; }
+  .d2-side-title { font-size: 12px; font-weight: 600; color: #8B8FA8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
+  .d2-code-item { margin-bottom: 14px; }
+  .d2-code-item .ci-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .d2-code-item .ci-name { font-size: 12px; font-weight: 500; }
+  .d2-code-item .ci-count { font-size: 12px; font-weight: 600; color: #8B8FA8; }
+  .d2-bar-track { height: 4px; background: #22263A; border-radius: 2px; overflow: hidden; }
+  .d2-bar-fill { height: 100%; border-radius: 2px; }
+  .d2-bar-fill.insuf { background: #3B82F6; width: 48%; }
+  .d2-bar-fill.expired { background: #6B7280; width: 30%; }
+  .d2-bar-fill.dnh { background: #8B8FA8; width: 13%; }
+  .d2-bar-fill.fraud { background: #EF4444; width: 9%; }
+
+  /* ─────────────────────────────────────────────────────────────
+     DIRECTION 3 — "Story Arc" REFINED (Light, narrative layout)
+  ───────────────────────────────────────────────────────────── */
+  .d3 { background: #F8F9FB; color: #0D0F1A; }
+  .d3-topbar { height: 56px; background: #FFFFFF; border-bottom: 1px solid #E2E5EF; display: flex; align-items: center; padding: 0 40px; gap: 24px; }
+  .d3-topbar-left { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+  .d3-logo { font-size: 15px; font-weight: 700; letter-spacing: -0.3px; }
+  .d3-logo span { color: #16A34A; }
+  .d3-workspace-divider { width: 1px; height: 18px; background: #E2E5EF; }
+  .d3-workspace { display: flex; align-items: center; gap: 6px; }
+  .d3-workspace-dot { width: 20px; height: 20px; border-radius: 5px; background: #0F172A; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: white; }
+  .d3-workspace-name { font-size: 13px; font-weight: 600; color: #0D0F1A; }
+  .d3-workspace-sub { font-size: 12px; color: #9CA3AF; }
+  .d3-engine { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #2563EB; font-weight: 500; }
+  .d3-engine::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #2563EB; flex-shrink: 0; animation: pulse 2s infinite; }
+  .d3-topbar-nav { display: flex; gap: 4px; }
+  .d3-topbar-nav a { padding: 6px 14px; font-size: 13px; font-weight: 500; color: #6B7280; border-radius: 6px; cursor: pointer; text-decoration: none; position: relative; }
+  .d3-topbar-nav a.active { background: #F0F2F7; color: #0D0F1A; }
+  .d3-topbar-nav a .nav-badge { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; background: #DC2626; color: white; border-radius: 50%; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .d3-attention-bar { margin: 0; background: #FFF7ED; border-bottom: 1px solid #FED7AA; padding: 12px 40px; display: flex; align-items: center; gap: 16px; }
+  .d3-attention-icon { width: 28px; height: 28px; background: #EA580C; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+  .d3-attention-text { flex: 1; }
+  .d3-attention-text strong { font-size: 13px; font-weight: 600; color: #9A3412; }
+  .d3-attention-text span { font-size: 12px; color: #C2410C; margin-left: 8px; }
+  .d3-attention-items { display: flex; gap: 8px; }
+  .d3-attention-pill { padding: 4px 12px; background: #FFFFFF; border: 1px solid #FED7AA; border-radius: 20px; font-size: 12px; font-weight: 500; color: #9A3412; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .d3-attention-pill::before { content: '●'; font-size: 8px; color: #DC2626; }
+  .d3-content { padding: 36px 40px 32px; max-width: 1280px; margin: 0 auto; }
+  .d3-page-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 28px; }
+  .d3-page-title { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+  .d3-page-sub { font-size: 13px; color: #6B7280; margin-top: 4px; }
+  .d3-page-period { font-size: 12px; color: #9CA3AF; }
+  .d3-arc { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #E2E5EF; border-radius: 14px; overflow: hidden; margin-bottom: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .d3-arc-col { background: #FFFFFF; padding: 32px 36px; }
+  .d3-arc-col:last-child { background: #F0FDF4; }
+  .d3-arc-step { font-size: 10px; font-weight: 700; color: #9CA3AF; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .d3-arc-step-num { width: 18px; height: 18px; border-radius: 50%; background: #F0F2F7; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: #6B7280; }
+  .d3-arc-title { font-size: 13px; font-weight: 500; color: #6B7280; margin-bottom: 20px; }
+  .d3-arc-big { font-size: 52px; font-weight: 700; letter-spacing: -2px; line-height: 1; margin-bottom: 4px; }
+  .d3-arc-big.neutral { color: #0D0F1A; }
+  .d3-arc-big.blue { color: #2563EB; }
+  .d3-arc-big.green { color: #16A34A; }
+  .d3-arc-label { font-size: 13px; color: #6B7280; margin-bottom: 24px; }
+  .d3-arc-divider { height: 1px; background: #F0F2F7; margin-bottom: 20px; }
+  .d3-arc-kpi-row { display: flex; gap: 24px; margin-bottom: 16px; }
+  .d3-arc-kpi { }
+  .d3-arc-kpi .kpi-val { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+  .d3-arc-kpi .kpi-val.blue { color: #2563EB; }
+  .d3-arc-kpi .kpi-val.green { color: #16A34A; }
+  .d3-arc-kpi .kpi-label { font-size: 11px; color: #9CA3AF; margin-top: 2px; }
+  .d3-arc-items { display: flex; flex-direction: column; gap: 8px; }
+  .d3-arc-item { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+  .d3-arc-item .item-name { color: #6B7280; }
+  .d3-arc-item .item-val { font-weight: 600; color: #0D0F1A; }
+  .d3-subscribers { }
+  .d3-sec-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .d3-sec-title { font-size: 16px; font-weight: 600; }
+  .d3-filter-row { display: flex; gap: 8px; }
+  .d3-filter { padding: 5px 12px; border: 1px solid #E2E5EF; border-radius: 20px; font-size: 12px; font-weight: 500; color: #6B7280; cursor: pointer; font-family: inherit; background: white; }
+  .d3-filter.active { background: #0F172A; color: white; border-color: #0F172A; }
+  .d3-card-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .d3-sub-card { padding: 18px; background: #FFFFFF; border: 1px solid #E2E5EF; border-radius: 12px; cursor: pointer; transition: all 0.15s; }
+  .d3-sub-card:hover { border-color: #0D0F1A; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .d3-sub-card.attention { border-color: #FED7AA; background: #FFFBF7; }
+  .d3-sub-card .sc-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+  .d3-sub-card .sc-name { font-size: 14px; font-weight: 600; }
+  .d3-sub-card .sc-email { font-size: 12px; color: #9CA3AF; margin-top: 2px; }
+  .d3-sub-card .sc-amount { font-size: 20px; font-weight: 700; color: #0D0F1A; }
+  .d3-sub-card .sc-label { font-size: 11px; color: #9CA3AF; margin-top: 2px; text-align: right; }
+  .d3-sub-card .sc-bottom { display: flex; align-items: center; justify-content: space-between; }
+  .d3-sub-card .sc-reason { font-size: 12px; color: #6B7280; }
+
+  /* ─────────────────────────────────────────────────────────────
+     DIRECTION 4 — "Calm Authority" (Light, spacious, premium)
+  ───────────────────────────────────────────────────────────── */
+  .d4 { background: #FAFAFA; color: #0D0F1A; }
+  .d4-shell { display: flex; height: calc(100vh - 52px); }
+  .d4-sidebar { width: 256px; flex-shrink: 0; background: #FFFFFF; border-right: 1px solid #E2E5EF; padding: 28px 20px; display: flex; flex-direction: column; }
+  .d4-logo { font-size: 16px; font-weight: 700; letter-spacing: -0.4px; margin-bottom: 32px; padding: 0 8px; }
+  .d4-logo span { color: #16A34A; }
+  .d4-nav-group { margin-bottom: 24px; }
+  .d4-nav-label { font-size: 10px; font-weight: 600; color: #9CA3AF; text-transform: uppercase; letter-spacing: 1px; padding: 0 8px; margin-bottom: 6px; }
+  .d4-nav-item { padding: 9px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; color: #6B7280; cursor: pointer; display: flex; align-items: center; gap: 10px; margin-bottom: 2px; }
+  .d4-nav-item:hover { background: #F8F9FB; color: #0D0F1A; }
+  .d4-nav-item.active { background: #0F172A; color: #FFFFFF; }
+  .d4-mode-box { margin-top: auto; padding: 16px; background: #F8F9FB; border-radius: 10px; border: 1px solid #E2E5EF; }
+  .d4-mode-label { font-size: 11px; font-weight: 600; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; }
+  .d4-mode-toggle-row { display: flex; background: #FFFFFF; border: 1px solid #E2E5EF; border-radius: 8px; padding: 3px; gap: 3px; }
+  .d4-mode-opt { flex: 1; padding: 6px; text-align: center; font-size: 12px; font-weight: 500; color: #6B7280; border-radius: 6px; cursor: pointer; }
+  .d4-mode-opt.active { background: #0F172A; color: #FFFFFF; }
+  .d4-engine-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+  .d4-engine-dot { width: 7px; height: 7px; border-radius: 50%; background: #2563EB; animation: pulse 2s infinite; }
+  .d4-engine-text { font-size: 12px; color: #6B7280; }
+  .d4-main { flex: 1; overflow-y: auto; padding: 40px 56px; }
+  .d4-hero-section { margin-bottom: 48px; }
+  .d4-hero-row { display: flex; align-items: flex-end; gap: 48px; padding: 48px; background: #FFFFFF; border: 1px solid #E2E5EF; border-radius: 16px; }
+  .d4-hero-primary {}
+  .d4-hero-eyebrow { font-size: 12px; font-weight: 600; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
+  .d4-hero-amount { font-size: 72px; font-weight: 700; color: #16A34A; letter-spacing: -3px; line-height: 1; }
+  .d4-hero-context { font-size: 15px; color: #6B7280; margin-top: 10px; }
+  .d4-hero-divider { width: 1px; background: #E2E5EF; align-self: stretch; }
+  .d4-hero-stats { display: flex; flex-direction: column; gap: 20px; flex: 1; }
+  .d4-stat { }
+  .d4-stat .s-label { font-size: 12px; color: #9CA3AF; margin-bottom: 4px; }
+  .d4-stat .s-value { font-size: 22px; font-weight: 700; color: #0D0F1A; letter-spacing: -0.5px; }
+  .d4-stat .s-value.blue { color: #2563EB; }
+  .d4-upgrade-box { padding: 20px 24px; background: #0F172A; border-radius: 12px; color: #F0F2F7; flex-shrink: 0; max-width: 220px; }
+  .d4-upgrade-box .ub-label { font-size: 11px; font-weight: 500; color: #8B8FA8; margin-bottom: 6px; }
+  .d4-upgrade-box .ub-amount { font-size: 28px; font-weight: 700; color: #22C55E; letter-spacing: -0.5px; }
+  .d4-upgrade-box .ub-sub { font-size: 12px; color: #8B8FA8; margin-bottom: 14px; }
+  .d4-upgrade-box .ub-btn { padding: 10px 16px; background: #F0F2F7; color: #0F172A; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; text-align: center; }
+  .d4-grid { display: grid; grid-template-columns: 1fr 280px; gap: 24px; }
+  .d4-list-card { background: #FFFFFF; border: 1px solid #E2E5EF; border-radius: 12px; overflow: hidden; }
+  .d4-list-header { padding: 20px 24px; border-bottom: 1px solid #E2E5EF; display: flex; align-items: center; gap: 12px; }
+  .d4-list-title { font-size: 14px; font-weight: 600; flex: 1; }
+  .d4-list-search { padding: 6px 12px; border: 1px solid #E2E5EF; border-radius: 6px; font-size: 12px; color: #6B7280; background: #F8F9FB; width: 180px; font-family: inherit; outline: none; }
+  .d4-list-row { padding: 14px 24px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #F0F2F7; cursor: pointer; transition: background 0.1s; }
+  .d4-list-row:last-child { border-bottom: none; }
+  .d4-list-row:hover { background: #F8F9FB; }
+  .d4-list-avatar { width: 38px; height: 38px; border-radius: 50%; background: #E2E5EF; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: #6B7280; flex-shrink: 0; }
+  .d4-list-info { flex: 1; }
+  .d4-list-name { font-size: 14px; font-weight: 500; }
+  .d4-list-reason { font-size: 12px; color: #9CA3AF; margin-top: 2px; }
+  .d4-list-right { text-align: right; }
+  .d4-list-amount { font-size: 14px; font-weight: 600; }
+  .d4-breakdown-card { background: #FFFFFF; border: 1px solid #E2E5EF; border-radius: 12px; padding: 24px; }
+  .d4-breakdown-title { font-size: 14px; font-weight: 600; margin-bottom: 20px; }
+  .d4-breakdown-item { margin-bottom: 16px; }
+  .d4-breakdown-item .bi-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .d4-breakdown-item .bi-name { font-size: 13px; font-weight: 500; }
+  .d4-breakdown-item .bi-count { font-size: 13px; font-weight: 600; color: #6B7280; }
+  .d4-breakdown-item .bi-sub { font-size: 11px; color: #9CA3AF; margin-bottom: 6px; }
+  .d4-prog { height: 6px; background: #F0F2F7; border-radius: 3px; overflow: hidden; }
+  .d4-prog-fill { height: 100%; border-radius: 3px; }
+  .d4-prog-fill.blue { background: #2563EB; }
+  .d4-prog-fill.gray { background: #9CA3AF; }
+  .d4-prog-fill.lgray { background: #D1D5DB; }
+  .d4-prog-fill.red { background: #DC2626; }
+
+  /* ─────────────────────────────────────────────────────────────
+     SHARED DIRECTION 1/3 badge dark equivalents
+  ───────────────────────────────────────────────────────────── */
+  .badge-dark.recovered { background: #14532D; color: #22C55E; }
+  .badge-dark.active { background: #1E3A5F; color: #3B82F6; }
+  .badge-dark.fraud { background: #450A0A; color: #EF4444; }
+  .badge-dark.churn { background: #1A1D27; color: #6B7280; }
+
+  /* Labels */
+  .direction-label { position: absolute; top: 60px; right: 16px; background: rgba(0,0,0,0.6); border: 1px solid #2A2D3A; border-radius: 8px; padding: 8px 14px; font-size: 11px; color: #8B8FA8; pointer-events: none; backdrop-filter: blur(8px); }
+</style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav class="direction-nav">
+  <h1>SafeNet — Design Directions</h1>
+  <button class="nav-btn active" onclick="showDirection('d1', this)">1 · Hero First</button>
+  <button class="nav-btn" onclick="showDirection('d2', this)">2 · Command Bar</button>
+  <button class="nav-btn" onclick="showDirection('d3', this)">3 · Story Arc ✦ Chosen</button>
+  <button class="nav-btn" onclick="showDirection('d4', this)">4 · Calm Authority</button>
+</nav>
+
+<!-- ═══════════════════════════════════════════════
+     DIRECTION 1 — "Hero First"
+     Light mode · Ultra-clean · Recovery number dominates
+════════════════════════════════════════════════ -->
+<div id="d1" class="direction d1 active">
+  <div class="d1-shell">
+    <!-- Sidebar -->
+    <aside class="d1-sidebar">
+      <div class="d1-logo">Safe<span>Net</span></div>
+      <div class="d1-nav-item active">
+        <svg class="d1-nav-icon" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+        Overview
+      </div>
+      <div class="d1-nav-item">
+        <svg class="d1-nav-icon" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="6" r="3"/><path d="M2 13c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
+        Subscribers
+      </div>
+      <div class="d1-nav-item">
+        <svg class="d1-nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1l1.8 3.6L14 5.5l-3 2.9.7 4.1L8 10.4l-3.7 2.1.7-4.1-3-2.9 4.2-.9z"/></svg>
+        Review Queue
+        <span style="margin-left:auto;background:#DBEAFE;color:#2563EB;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;">3</span>
+      </div>
+      <div class="d1-nav-item">
+        <svg class="d1-nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1v14M1 8h14"/></svg>
+        Notifications
+      </div>
+      <div class="d1-nav-item">
+        <svg class="d1-nav-icon" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 5v3l2 2"/></svg>
+        Audit Log
+      </div>
+      <div class="d1-nav-item">
+        <svg class="d1-nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 3h12M2 8h12M2 13h8"/></svg>
+        Settings
+      </div>
+      <div class="d1-engine-badge">
+        <div class="label">Engine</div>
+        <div class="status">Autopilot active</div>
+        <div class="sub">Last scan: 18 min ago</div>
+      </div>
+    </aside>
+    <!-- Main -->
+    <main class="d1-main">
+      <div class="d1-topbar">
+        <div class="d1-greeting">Good morning, Marc <span>· April 2026</span></div>
+        <div class="d1-mode-toggle"><span class="dot"></span> Autopilot</div>
+      </div>
+      <!-- Hero card -->
+      <div class="d1-hero">
+        <div class="d1-hero-left">
+          <div class="d1-hero-label">Recovered this month</div>
+          <div class="d1-hero-amount">€310</div>
+          <div class="d1-hero-sub">from 4 successful retries · Net benefit after plan: <strong>€281</strong></div>
+        </div>
+        <button class="d1-hero-cta">Activate recovery engine</button>
+      </div>
+      <!-- Metrics -->
+      <div class="d1-metrics">
+        <div class="d1-metric-card blue">
+          <div class="m-label">Estimated recoverable</div>
+          <div class="m-value">€640</div>
+          <div class="m-sub">23 active failures · 90-day scan</div>
+        </div>
+        <div class="d1-metric-card">
+          <div class="m-label">Active failures</div>
+          <div class="m-value">23</div>
+          <div class="m-sub">11 in retry queue · 7 notified</div>
+        </div>
+        <div class="d1-metric-card green">
+          <div class="m-label">Recovery rate</div>
+          <div class="m-value">43%</div>
+          <div class="m-sub">of retried payments · this month</div>
+        </div>
+      </div>
+      <!-- Subscriber list -->
+      <div class="d1-section-title">Recent subscriber activity <span class="see-all">See all 23 →</span></div>
+      <div class="d1-subscriber-list">
+        <div class="d1-subscriber-row">
+          <div class="d1-avatar">SL</div>
+          <div class="d1-sub-info">
+            <div class="d1-sub-name">Sophie L.</div>
+            <div class="d1-sub-detail">Card updated · retry succeeded</div>
+          </div>
+          <div class="d1-sub-amount">€39</div>
+          <span class="badge recovered">Recovered</span>
+        </div>
+        <div class="d1-subscriber-row">
+          <div class="d1-avatar">TM</div>
+          <div class="d1-sub-info">
+            <div class="d1-sub-name">Thomas M.</div>
+            <div class="d1-sub-detail">Insufficient funds · payday retry scheduled 1 May</div>
+          </div>
+          <div class="d1-sub-amount">€89</div>
+          <span class="badge active">In recovery</span>
+        </div>
+        <div class="d1-subscriber-row">
+          <div class="d1-avatar">AK</div>
+          <div class="d1-sub-info">
+            <div class="d1-sub-name">Anna K.</div>
+            <div class="d1-sub-detail">Card expired · update request sent</div>
+          </div>
+          <div class="d1-sub-amount">€49</div>
+          <span class="badge active">In recovery</span>
+        </div>
+        <div class="d1-subscriber-row">
+          <div class="d1-avatar">JB</div>
+          <div class="d1-sub-info">
+            <div class="d1-sub-name">James B.</div>
+            <div class="d1-sub-detail">Fraud flagged · all actions stopped</div>
+          </div>
+          <div class="d1-sub-amount">€120</div>
+          <span class="badge fraud">Fraud flagged</span>
+        </div>
+        <div class="d1-subscriber-row">
+          <div class="d1-avatar">MR</div>
+          <div class="d1-sub-info">
+            <div class="d1-sub-name">Marie R.</div>
+            <div class="d1-sub-detail">3 retries exhausted · recovery complete</div>
+          </div>
+          <div class="d1-sub-amount">€29</div>
+          <span class="badge churn">Passive churn</span>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     DIRECTION 2 — "Command Bar"
+     Dark mode · Dense · Technical founder
+════════════════════════════════════════════════ -->
+<div id="d2" class="direction d2">
+  <div class="d2-shell">
+    <aside class="d2-sidebar">
+      <div class="d2-logo">Safe<span>Net</span></div>
+      <div class="d2-sidebar-section">Main</div>
+      <div class="d2-nav-item active">◈ Overview</div>
+      <div class="d2-nav-item">⊙ Subscribers</div>
+      <div class="d2-nav-item">⊞ Review Queue <span style="margin-left:auto;background:#1E3A5F;color:#3B82F6;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;">3</span></div>
+      <div class="d2-sidebar-section">System</div>
+      <div class="d2-nav-item">≡ Notifications</div>
+      <div class="d2-nav-item">◷ Audit Log</div>
+      <div class="d2-nav-item">⚙ Settings</div>
+      <div class="d2-engine">
+        <div class="e-label">Engine</div>
+        <div class="e-status">Autopilot</div>
+        <div class="e-sub">Last scan 18m ago · next in 42m</div>
+      </div>
+    </aside>
+    <div class="d2-main">
+      <div class="d2-topbar">
+        <div class="d2-topbar-title">Overview</div>
+        <div class="d2-topbar-badge">April 2026</div>
+        <div class="d2-topbar-badge">Marc's workspace</div>
+      </div>
+      <div class="d2-content">
+        <div class="d2-kpi-row">
+          <div class="d2-kpi green">
+            <div class="k-label">Recovered</div>
+            <div class="k-value">€310</div>
+            <div class="k-sub">4 payments · this month</div>
+          </div>
+          <div class="d2-kpi blue">
+            <div class="k-label">Recoverable</div>
+            <div class="k-value">€640</div>
+            <div class="k-sub">23 failures · 90-day scan</div>
+          </div>
+          <div class="d2-kpi white">
+            <div class="k-label">Active</div>
+            <div class="k-value">18</div>
+            <div class="k-sub">in recovery queue</div>
+          </div>
+          <div class="d2-kpi white">
+            <div class="k-label">Recovery rate</div>
+            <div class="k-value">43%</div>
+            <div class="k-sub">retried · this month</div>
+          </div>
+        </div>
+        <div class="d2-body">
+          <div class="d2-table-card">
+            <div class="d2-table-header">
+              <span class="th-title">Subscribers</span>
+              <button class="th-filter">All statuses ▾</button>
+            </div>
+            <div class="d2-col-headers">
+              <span>Subscriber</span>
+              <span>Amount</span>
+              <span>Reason</span>
+              <span>Status</span>
+            </div>
+            <div class="d2-row">
+              <div><div class="r-name">Sophie L.</div><div class="r-sub">Card updated · retry queued</div></div>
+              <div class="r-amount">€39</div>
+              <div style="font-size:12px;color:#8B8FA8">Card expired</div>
+              <span class="badge badge-dark recovered">Recovered</span>
+            </div>
+            <div class="d2-row">
+              <div><div class="r-name">Thomas M.</div><div class="r-sub">Payday retry: 1 May</div></div>
+              <div class="r-amount">€89</div>
+              <div style="font-size:12px;color:#8B8FA8">Insuf. funds</div>
+              <span class="badge badge-dark active">Active</span>
+            </div>
+            <div class="d2-row">
+              <div><div class="r-name">Anna K.</div><div class="r-sub">Update request sent · 2d ago</div></div>
+              <div class="r-amount">€49</div>
+              <div style="font-size:12px;color:#8B8FA8">Card expired</div>
+              <span class="badge badge-dark active">Active</span>
+            </div>
+            <div class="d2-row">
+              <div><div class="r-name">James B.</div><div class="r-sub">All actions stopped · review</div></div>
+              <div class="r-amount">€120</div>
+              <div style="font-size:12px;color:#8B8FA8">Fraudulent</div>
+              <span class="badge badge-dark fraud">Fraud</span>
+            </div>
+            <div class="d2-row">
+              <div><div class="r-name">Marie R.</div><div class="r-sub">3 retries · cap reached</div></div>
+              <div class="r-amount">€29</div>
+              <div style="font-size:12px;color:#8B8FA8">Do not honor</div>
+              <span class="badge badge-dark churn">Churn</span>
+            </div>
+          </div>
+          <div>
+            <div class="d2-side-card">
+              <div class="d2-side-title">Failure breakdown</div>
+              <div class="d2-code-item">
+                <div class="ci-header"><span class="ci-name">Insufficient funds</span><span class="ci-count">11</span></div>
+                <div class="d2-bar-track"><div class="d2-bar-fill insuf"></div></div>
+              </div>
+              <div class="d2-code-item">
+                <div class="ci-header"><span class="ci-name">Card expired</span><span class="ci-count">7</span></div>
+                <div class="d2-bar-track"><div class="d2-bar-fill expired"></div></div>
+              </div>
+              <div class="d2-code-item">
+                <div class="ci-header"><span class="ci-name">Do not honor</span><span class="ci-count">3</span></div>
+                <div class="d2-bar-track"><div class="d2-bar-fill dnh"></div></div>
+              </div>
+              <div class="d2-code-item">
+                <div class="ci-header"><span class="ci-name">Fraudulent</span><span class="ci-count">2</span></div>
+                <div class="d2-bar-track"><div class="d2-bar-fill fraud"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     DIRECTION 3 — "Story Arc" REFINED
+     Light · Workspace identity · Attention bar · Big KPIs
+════════════════════════════════════════════════ -->
+<div id="d3" class="direction d3">
+  <!-- Top bar with workspace identity -->
+  <div class="d3-topbar">
+    <div class="d3-topbar-left">
+      <div class="d3-logo">Safe<span>Net</span></div>
+      <div class="d3-workspace-divider"></div>
+      <div class="d3-workspace">
+        <div class="d3-workspace-dot">PP</div>
+        <div>
+          <div class="d3-workspace-name">ProductivityPro</div>
+          <div class="d3-workspace-sub">Marc's workspace</div>
+        </div>
+      </div>
+    </div>
+    <div class="d3-engine">Autopilot active · last scan 18m ago</div>
+    <div class="d3-topbar-nav">
+      <a class="active">Overview</a>
+      <a>Subscribers</a>
+      <a style="position:relative">Review <span class="nav-badge">3</span></a>
+      <a>Settings</a>
+    </div>
+  </div>
+
+  <!-- Attention bar — always visible when items need action -->
+  <div class="d3-attention-bar">
+    <div class="d3-attention-icon">⚠</div>
+    <div class="d3-attention-text">
+      <strong>2 items need your attention</strong>
+      <span>Review before next engine cycle in 42 min</span>
+    </div>
+    <div class="d3-attention-items">
+      <div class="d3-attention-pill">James B. — Fraud flagged</div>
+      <div class="d3-attention-pill">3 retries pending approval</div>
+    </div>
+  </div>
+
+  <div class="d3-content">
+    <div class="d3-page-header">
+      <div>
+        <div class="d3-page-title">Payment health · ProductivityPro</div>
+        <div class="d3-page-sub">SafeNet scanned 90 days of Stripe activity. Here's where your money stands.</div>
+      </div>
+      <div class="d3-page-period">April 2026</div>
+    </div>
+
+    <!-- Arc — 3 columns with big KPIs -->
+    <div class="d3-arc">
+      <!-- Column 1: Detected -->
+      <div class="d3-arc-col">
+        <div class="d3-arc-step"><span class="d3-arc-step-num">1</span> Detected</div>
+        <div class="d3-arc-title">Failed payments found</div>
+        <div class="d3-arc-big neutral">23</div>
+        <div class="d3-arc-label">in the last 90 days</div>
+        <div class="d3-arc-divider"></div>
+        <div class="d3-arc-items">
+          <div class="d3-arc-item"><span class="item-name">Insufficient funds</span><span class="item-val">11</span></div>
+          <div class="d3-arc-item"><span class="item-name">Card expired</span><span class="item-val">7</span></div>
+          <div class="d3-arc-item"><span class="item-name">Do not honor</span><span class="item-val">3</span></div>
+          <div class="d3-arc-item"><span class="item-name">Fraudulent</span><span class="item-val">2</span></div>
+        </div>
+      </div>
+
+      <!-- Column 2: In progress — Estimated recoverable prominent -->
+      <div class="d3-arc-col">
+        <div class="d3-arc-step"><span class="d3-arc-step-num">2</span> In progress</div>
+        <div class="d3-arc-title">Estimated recoverable</div>
+        <div class="d3-arc-big blue">€640</div>
+        <div class="d3-arc-label">18 subscribers in active recovery</div>
+        <div class="d3-arc-divider"></div>
+        <div class="d3-arc-kpi-row">
+          <div class="d3-arc-kpi">
+            <div class="kpi-val blue">43%</div>
+            <div class="kpi-label">Recovery rate</div>
+          </div>
+          <div class="d3-arc-kpi">
+            <div class="kpi-val">9</div>
+            <div class="kpi-label">Retries scheduled</div>
+          </div>
+          <div class="d3-arc-kpi">
+            <div class="kpi-val">7</div>
+            <div class="kpi-label">Emails sent</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Column 3: Recovered -->
+      <div class="d3-arc-col">
+        <div class="d3-arc-step"><span class="d3-arc-step-num">3</span> Recovered</div>
+        <div class="d3-arc-title">Revenue protected this month</div>
+        <div class="d3-arc-big green">€310</div>
+        <div class="d3-arc-label">net benefit after plan: <strong>€281</strong></div>
+        <div class="d3-arc-divider"></div>
+        <div class="d3-arc-kpi-row">
+          <div class="d3-arc-kpi">
+            <div class="kpi-val green">4</div>
+            <div class="kpi-label">Successful retries</div>
+          </div>
+          <div class="d3-arc-kpi">
+            <div class="kpi-val green">€29/mo</div>
+            <div class="kpi-label">Plan cost</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Subscribers -->
+    <div class="d3-subscribers">
+      <div class="d3-sec-header">
+        <div class="d3-sec-title">Subscribers</div>
+        <div class="d3-filter-row">
+          <button class="d3-filter active">All</button>
+          <button class="d3-filter">In recovery</button>
+          <button class="d3-filter">Recovered</button>
+          <button class="d3-filter" style="color:#EA580C;border-color:#FED7AA;background:#FFF7ED">Needs attention (2)</button>
+        </div>
+      </div>
+      <div class="d3-card-grid">
+        <!-- Attention card — fraud flag, visually distinct -->
+        <div class="d3-sub-card attention">
+          <div class="sc-top">
+            <div><div class="sc-name">James B.</div><div class="sc-email">james.b@techco.com</div></div>
+            <div><div class="sc-amount" style="color:#DC2626">€120</div><div class="sc-label">at risk</div></div>
+          </div>
+          <div class="sc-bottom"><span class="sc-reason" style="color:#C2410C">⚠ Fraud flagged · review required</span><span class="badge fraud">Fraud flagged</span></div>
+        </div>
+        <div class="d3-sub-card">
+          <div class="sc-top">
+            <div><div class="sc-name">Sophie L.</div><div class="sc-email">sophie@design.io</div></div>
+            <div><div class="sc-amount" style="color:#16A34A">€39</div><div class="sc-label">recovered</div></div>
+          </div>
+          <div class="sc-bottom"><span class="sc-reason">Card expired · retry succeeded</span><span class="badge recovered">Recovered</span></div>
+        </div>
+        <div class="d3-sub-card">
+          <div class="sc-top">
+            <div><div class="sc-name">Thomas M.</div><div class="sc-email">t.martin@gmail.com</div></div>
+            <div><div class="sc-amount">€89</div><div class="sc-label">at risk</div></div>
+          </div>
+          <div class="sc-bottom"><span class="sc-reason">Insufficient funds · retry May 1</span><span class="badge active">In recovery</span></div>
+        </div>
+        <div class="d3-sub-card">
+          <div class="sc-top">
+            <div><div class="sc-name">Anna K.</div><div class="sc-email">anna.k@company.eu</div></div>
+            <div><div class="sc-amount">€49</div><div class="sc-label">at risk</div></div>
+          </div>
+          <div class="sc-bottom"><span class="sc-reason">Card expired · update requested</span><span class="badge active">In recovery</span></div>
+        </div>
+        <div class="d3-sub-card">
+          <div class="sc-top">
+            <div><div class="sc-name">Marie R.</div><div class="sc-email">marie.r@startup.fr</div></div>
+            <div><div class="sc-amount" style="color:#6B7280">€29</div><div class="sc-label">exhausted</div></div>
+          </div>
+          <div class="sc-bottom"><span class="sc-reason">All retries exhausted · case closed</span><span class="badge churn">Passive churn</span></div>
+        </div>
+        <div class="d3-sub-card" style="border-style:dashed;display:flex;align-items:center;justify-content:center;min-height:120px;background:#F8F9FB;">
+          <div style="text-align:center;color:#9CA3AF;font-size:13px;">+18 more subscribers<br><span style="font-size:12px">Click to view all</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     DIRECTION 4 — "Calm Authority"
+     Light · Spacious · Premium feel · Both audiences
+════════════════════════════════════════════════ -->
+<div id="d4" class="direction d4">
+  <div class="d4-shell">
+    <aside class="d4-sidebar">
+      <div class="d4-logo">Safe<span>Net</span></div>
+      <div class="d4-nav-group">
+        <div class="d4-nav-label">Workspace</div>
+        <div class="d4-nav-item active">Overview</div>
+        <div class="d4-nav-item">Subscribers</div>
+        <div class="d4-nav-item">Review Queue <span style="margin-left:auto;background:#DBEAFE;color:#2563EB;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;">3</span></div>
+      </div>
+      <div class="d4-nav-group">
+        <div class="d4-nav-label">Configure</div>
+        <div class="d4-nav-item">Notifications</div>
+        <div class="d4-nav-item">Audit Log</div>
+        <div class="d4-nav-item">Settings</div>
+      </div>
+      <div class="d4-mode-box">
+        <div class="d4-mode-label">Recovery mode</div>
+        <div class="d4-mode-toggle-row">
+          <div class="d4-mode-opt active">Autopilot</div>
+          <div class="d4-mode-opt">Supervised</div>
+        </div>
+        <div class="d4-engine-row">
+          <div class="d4-engine-dot"></div>
+          <div class="d4-engine-text">Active · last scan 18m ago</div>
+        </div>
+      </div>
+    </aside>
+    <main class="d4-main">
+      <!-- Hero -->
+      <div class="d4-hero-section">
+        <div class="d4-hero-row">
+          <div class="d4-hero-primary">
+            <div class="d4-hero-eyebrow">Recovered this month</div>
+            <div class="d4-hero-amount">€310</div>
+            <div class="d4-hero-context">4 successful retries · Net after plan: <strong>€281</strong></div>
+          </div>
+          <div class="d4-hero-divider"></div>
+          <div class="d4-hero-stats">
+            <div class="d4-stat">
+              <div class="s-label">Estimated recoverable</div>
+              <div class="s-value blue">€640</div>
+            </div>
+            <div class="d4-stat">
+              <div class="s-label">Active failures</div>
+              <div class="s-value">23</div>
+            </div>
+            <div class="d4-stat">
+              <div class="s-label">Recovery rate</div>
+              <div class="s-value">43%</div>
+            </div>
+          </div>
+          <div class="d4-upgrade-box">
+            <div class="ub-label">Estimated recoverable</div>
+            <div class="ub-amount">€640</div>
+            <div class="ub-sub">Your plan costs €29/mo · net benefit €611</div>
+            <div class="ub-btn">Activate recovery engine</div>
+          </div>
+        </div>
+      </div>
+      <!-- Body grid -->
+      <div class="d4-grid">
+        <div class="d4-list-card">
+          <div class="d4-list-header">
+            <div class="d4-list-title">Subscribers</div>
+            <input class="d4-list-search" placeholder="Search subscribers…" />
+          </div>
+          <div class="d4-list-row">
+            <div class="d4-list-avatar">SL</div>
+            <div class="d4-list-info">
+              <div class="d4-list-name">Sophie L.</div>
+              <div class="d4-list-reason">Card expired · retry succeeded after update</div>
+            </div>
+            <div class="d4-list-right">
+              <div class="d4-list-amount" style="color:#16A34A">€39 recovered</div>
+              <span class="badge recovered" style="float:right;margin-top:4px">Recovered</span>
+            </div>
+          </div>
+          <div class="d4-list-row">
+            <div class="d4-list-avatar">TM</div>
+            <div class="d4-list-info">
+              <div class="d4-list-name">Thomas M.</div>
+              <div class="d4-list-reason">Insufficient funds · payday retry scheduled May 1</div>
+            </div>
+            <div class="d4-list-right">
+              <div class="d4-list-amount">€89 at risk</div>
+              <span class="badge active" style="float:right;margin-top:4px">In recovery</span>
+            </div>
+          </div>
+          <div class="d4-list-row">
+            <div class="d4-list-avatar">AK</div>
+            <div class="d4-list-info">
+              <div class="d4-list-name">Anna K.</div>
+              <div class="d4-list-reason">Card expired · payment update request sent 2 days ago</div>
+            </div>
+            <div class="d4-list-right">
+              <div class="d4-list-amount">€49 at risk</div>
+              <span class="badge active" style="float:right;margin-top:4px">In recovery</span>
+            </div>
+          </div>
+          <div class="d4-list-row">
+            <div class="d4-list-avatar">JB</div>
+            <div class="d4-list-info">
+              <div class="d4-list-name">James B.</div>
+              <div class="d4-list-reason">Fraud flagged by card issuer · SafeNet stopped all actions</div>
+            </div>
+            <div class="d4-list-right">
+              <div class="d4-list-amount">€120 at risk</div>
+              <span class="badge fraud" style="float:right;margin-top:4px">Fraud flagged</span>
+            </div>
+          </div>
+          <div class="d4-list-row">
+            <div class="d4-list-avatar">MR</div>
+            <div class="d4-list-info">
+              <div class="d4-list-name">Marie R.</div>
+              <div class="d4-list-reason">All retry paths exhausted · case closed</div>
+            </div>
+            <div class="d4-list-right">
+              <div class="d4-list-amount" style="color:#6B7280">€29</div>
+              <span class="badge churn" style="float:right;margin-top:4px">Passive churn</span>
+            </div>
+          </div>
+        </div>
+        <!-- Breakdown card -->
+        <div class="d4-breakdown-card">
+          <div class="d4-breakdown-title">Failure breakdown</div>
+          <div class="d4-breakdown-item">
+            <div class="bi-row"><span class="bi-name">Insufficient funds</span><span class="bi-count">11 cases</span></div>
+            <div class="bi-sub">Payday retry scheduled · highest recovery rate</div>
+            <div class="d4-prog"><div class="d4-prog-fill blue" style="width:48%"></div></div>
+          </div>
+          <div class="d4-breakdown-item">
+            <div class="bi-row"><span class="bi-name">Card expired</span><span class="bi-count">7 cases</span></div>
+            <div class="bi-sub">Update request sent · no retry until new card</div>
+            <div class="d4-prog"><div class="d4-prog-fill gray" style="width:30%"></div></div>
+          </div>
+          <div class="d4-breakdown-item">
+            <div class="bi-row"><span class="bi-name">Do not honor</span><span class="bi-count">3 cases</span></div>
+            <div class="bi-sub">Bank declined · limited retry window</div>
+            <div class="d4-prog"><div class="d4-prog-fill lgray" style="width:13%"></div></div>
+          </div>
+          <div class="d4-breakdown-item">
+            <div class="bi-row"><span class="bi-name">Fraud flagged</span><span class="bi-count">2 cases</span></div>
+            <div class="bi-sub">All actions stopped · manual review</div>
+            <div class="d4-prog"><div class="d4-prog-fill red" style="width:9%"></div></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+function showDirection(id, btn) {
+  document.querySelectorAll('.direction').forEach(d => d.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>

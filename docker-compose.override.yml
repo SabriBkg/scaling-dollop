@@ -1,0 +1,11 @@
+# Local development overrides — hot-reload configuration
+# This file is automatically merged by docker compose when present.
+services:
+  web:
+    environment:
+      - DJANGO_SETTINGS_MODULE=safenet_backend.settings.development
+    # Django dev server already provides hot-reload via volume mount in docker-compose.yml
+
+  frontend:
+    environment:
+      - WATCHPACK_POLLING=true  # Required for hot-reload inside Docker on some systems
