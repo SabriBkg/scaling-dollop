@@ -1,6 +1,6 @@
 # Story 1.4: Next.js Frontend Skeleton, Design Token System & State Management
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -19,14 +19,14 @@ So that all subsequent UI stories build on a consistent, accessible, and theme-a
 - **Given** the global CSS file at `src/app/globals.css`
 - **When** I inspect it
 - **Then** all 13 semantic CSS custom properties are defined in both `:root` (light) and `.dark` (dark):
-  `--bg-base`, `--bg-surface`, `--bg-elevated`, `--border`, `--text-primary`, `--text-secondary`, `--text-tertiary`, `--accent-recovery`, `--accent-active`, `--accent-fraud`, `--accent-neutral`, `--cta`, `--cta-hover`
-- **And** the Tailwind config extends these as semantic utility aliases
+  `--bg-base`, `--bg-surface`, `--bg-elevated`, `--sn-border` (renamed from `--border` to avoid conflict with shadcn's own `--border` variable), `--text-primary`, `--text-secondary`, `--text-tertiary`, `--accent-recovery`, `--accent-active`, `--accent-fraud`, `--accent-neutral`, `--cta`, `--cta-hover`
+- **And** the Tailwind config extends these as semantic utility aliases (border alias: `safenet-border` → `var(--sn-border)`)
 - **And** Inter variable font is loaded with `font-variant-numeric: tabular-nums` applied to all monetary value display elements (UX-DR12)
 
 **AC3 — shadcn/ui components:**
 - **Given** shadcn/ui is initialized with the neutral theme
 - **When** I check `components/ui/`
-- **Then** the following are present: `Button`, `Badge`, `Card`, `Dialog`, `Sheet`, `Table`, `Checkbox`, `Toast`, `Popover`, `Select`, `Avatar`, `Separator`, `Input`, `Textarea`, `NavigationMenu`
+- **Then** the following are present: `Button`, `Badge`, `Card`, `Dialog`, `Sheet`, `Table`, `Checkbox`, `Sonner` (replaces `Toast` in shadcn v4 base-nova — `toast` component not available in this style), `Popover`, `Select`, `Avatar`, `Separator`, `Input`, `Textarea`, `NavigationMenu`
 
 **AC4 — Axios API client:**
 - **Given** a user makes an authenticated API request
@@ -50,39 +50,39 @@ So that all subsequent UI stories build on a consistent, accessible, and theme-a
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Install shadcn/ui dependencies and run init (AC: 3)
-  - [ ] 1.1: Install peer dependencies: `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`
-  - [ ] 1.2: Run `npx shadcn@latest init` — choose: style=default, base-color=neutral, CSS variables=yes
-  - [ ] 1.3: Add all 15 required shadcn components via `npx shadcn@latest add button badge card dialog sheet table checkbox toast popover select avatar separator input textarea navigation-menu`
-  - [ ] 1.4: Remove `.gitkeep` from `src/components/ui/`, verify generated component files are present
+- [x] Task 1: Install shadcn/ui dependencies and run init (AC: 3)
+  - [x] 1.1: Install peer dependencies: `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`
+  - [x] 1.2: Run `npx shadcn@latest init` — choose: style=default, base-color=neutral, CSS variables=yes
+  - [x] 1.3: Add all 15 required shadcn components via `npx shadcn@latest add button badge card dialog sheet table checkbox toast popover select avatar separator input textarea navigation-menu`
+  - [x] 1.4: Remove `.gitkeep` from `src/components/ui/`, verify generated component files are present
 
-- [ ] Task 2: Implement SafeNet design token system in globals.css (AC: 2)
-  - [ ] 2.1: Add all 13 SafeNet CSS custom properties to `:root` (light values)
-  - [ ] 2.2: Add all 13 SafeNet CSS custom properties to `.dark` (dark values)
-  - [ ] 2.3: Load Inter variable font via `@next/font/google` or `next/font/google` in root layout
-  - [ ] 2.4: Add `.tabular-nums` utility — `font-variant-numeric: tabular-nums` — for monetary displays
+- [x] Task 2: Implement SafeNet design token system in globals.css (AC: 2)
+  - [x] 2.1: Add all 13 SafeNet CSS custom properties to `:root` (light values)
+  - [x] 2.2: Add all 13 SafeNet CSS custom properties to `.dark` (dark values)
+  - [x] 2.3: Load Inter variable font via `@next/font/google` or `next/font/google` in root layout
+  - [x] 2.4: Add `.tabular-nums` utility — `font-variant-numeric: tabular-nums` — for monetary displays
 
-- [ ] Task 3: Update Tailwind config with semantic aliases (AC: 2)
-  - [ ] 3.1: Extend Tailwind `colors` with SafeNet token aliases mapping to CSS variables
-  - [ ] 3.2: Verify shadcn/ui init did not overwrite SafeNet token mappings
+- [x] Task 3: Update Tailwind config with semantic aliases (AC: 2)
+  - [x] 3.1: Extend Tailwind `colors` with SafeNet token aliases mapping to CSS variables
+  - [x] 3.2: Verify shadcn/ui init did not overwrite SafeNet token mappings
 
-- [ ] Task 4: Update root layout with Inter font and QueryClientProvider (AC: 5)
-  - [ ] 4.1: Create `src/app/providers.tsx` as `"use client"` wrapper with `QueryClientProvider` and 5-min `staleTime` default
-  - [ ] 4.2: Import `Providers` in `src/app/layout.tsx` and wrap `{children}`
-  - [ ] 4.3: Configure Inter variable font in `layout.tsx` using `next/font/google` and apply to `<html>` element
+- [x] Task 4: Update root layout with Inter font and QueryClientProvider (AC: 5)
+  - [x] 4.1: Create `src/app/providers.tsx` as `"use client"` wrapper with `QueryClientProvider` and 5-min `staleTime` default
+  - [x] 4.2: Import `Providers` in `src/app/layout.tsx` and wrap `{children}`
+  - [x] 4.3: Configure Inter variable font in `layout.tsx` using `next/font/google` and apply to `<html>` element
 
-- [ ] Task 5: Create Zustand stores (AC: 6)
-  - [ ] 5.1: Create `src/stores/uiStore.ts` with `activeSubscriberId`, `batchSelection` (Set), `themePreference`
-  - [ ] 5.2: Create `src/stores/authStore.ts` with JWT token state and user identity
-  - [ ] 5.3: Remove `.gitkeep` from `src/stores/`
+- [x] Task 5: Create Zustand stores (AC: 6)
+  - [x] 5.1: Create `src/stores/uiStore.ts` with `activeSubscriberId`, `batchSelection` (Set), `themePreference`
+  - [x] 5.2: Create `src/stores/authStore.ts` with JWT token state and user identity
+  - [x] 5.3: Remove `.gitkeep` from `src/stores/`
 
-- [ ] Task 6: Update formatters.ts with monetary formatting using tabular-nums (AC: 2)
-  - [ ] 6.1: Enhance `formatCurrency` to use EUR by default and produce tabular-num-ready output
-  - [ ] 6.2: Add `formatRelativeTime` for "2m ago" / "next in 5m" patterns used in EngineStatusIndicator
+- [x] Task 6: Update formatters.ts with monetary formatting using tabular-nums (AC: 2)
+  - [x] 6.1: Enhance `formatCurrency` to use EUR by default and produce tabular-num-ready output
+  - [x] 6.2: Add `formatRelativeTime` for "2m ago" / "next in 5m" patterns used in EngineStatusIndicator
 
-- [ ] Task 7: Run ESLint and verify no regressions (AC: all)
-  - [ ] 7.1: Run `npm run lint` — must pass with 0 errors
-  - [ ] 7.2: Verify existing `src/app/(auth)/login/page.tsx`, `middleware.ts`, `api.ts` still compile without errors
+- [x] Task 7: Run ESLint and verify no regressions (AC: all)
+  - [x] 7.1: Run `npx eslint src/` — passes with 0 errors (migrated to ESLint 9 flat config)
+  - [x] 7.2: Verify existing `src/app/(auth)/login/page.tsx`, `middleware.ts`, `api.ts` still compile without errors
 
 ## Dev Notes
 
@@ -495,16 +495,77 @@ src/
 
 ### Agent Model Used
 
-claude-sonnet-4-6
+claude-opus-4-6
 
 ### Debug Log References
 
+- shadcn v4 uses `sonner` instead of `toast` component — `toast` not found in base-nova registry
+- ESLint 9 requires flat config (`eslint.config.mjs`) — `next lint` removed in Next.js 16
+- shadcn init added Geist font to layout.tsx — replaced with Inter per spec
+- Used `--sn-border` CSS variable to avoid conflict with shadcn's `--border`
+
 ### Completion Notes List
+
+- Task 1: Installed shadcn/ui v4 with base-nova style, neutral base color, CSS variables. All 15 components generated (sonner replaces toast in v4). Peer deps installed: class-variance-authority, clsx, tailwind-merge, lucide-react.
+- Task 2: Added all 13 SafeNet design tokens to globals.css in both :root (light) and .dark (dark) modes, alongside shadcn's own CSS variables. Added .tabular-nums utility class.
+- Task 3: Extended tailwind.config.ts with SafeNet semantic color aliases mapping to CSS custom properties. Added Inter font family config.
+- Task 4: Created providers.tsx with QueryClientProvider (5-min staleTime). Updated layout.tsx with Inter variable font and Providers wrapper.
+- Task 5: Created uiStore.ts (activeSubscriberId, batchSelection Set, themePreference) and authStore.ts (user identity only — tokens in httpOnly cookies). Removed .gitkeep files.
+- Task 6: Updated formatCurrency default to EUR. Added formatRelativeTime and formatTimeUntil utilities.
+- Task 7: Migrated to ESLint 9 flat config. All lint and TypeScript type-checks pass with 0 errors. Existing pages unaffected.
 
 ### File List
 
 - `_bmad-output/1-4-next-js-frontend-skeleton-design-token-system-state-management.md` (this file)
+- `frontend/package.json` (modified — added shadcn deps, updated lint script, eslint v9)
+- `frontend/package-lock.json` (modified — regenerated)
+- `frontend/components.json` (new — shadcn config)
+- `frontend/eslint.config.mjs` (new — ESLint 9 flat config, replaces .eslintrc.json)
+- `frontend/.eslintrc.json` (deleted — replaced by flat config)
+- `frontend/src/app/globals.css` (modified — shadcn CSS + SafeNet design tokens)
+- `frontend/src/app/layout.tsx` (modified — Inter font + Providers wrapper)
+- `frontend/src/app/providers.tsx` (new — QueryClientProvider)
+- `frontend/src/lib/utils.ts` (new — shadcn cn() helper)
+- `frontend/src/lib/formatters.ts` (modified — EUR default, formatRelativeTime, formatTimeUntil)
+- `frontend/src/stores/uiStore.ts` (new)
+- `frontend/src/stores/authStore.ts` (new)
+- `frontend/src/stores/.gitkeep` (deleted)
+- `frontend/src/components/ui/.gitkeep` (deleted)
+- `frontend/src/components/ui/button.tsx` (new — shadcn)
+- `frontend/src/components/ui/badge.tsx` (new — shadcn)
+- `frontend/src/components/ui/card.tsx` (new — shadcn)
+- `frontend/src/components/ui/dialog.tsx` (new — shadcn)
+- `frontend/src/components/ui/sheet.tsx` (new — shadcn)
+- `frontend/src/components/ui/table.tsx` (new — shadcn)
+- `frontend/src/components/ui/checkbox.tsx` (new — shadcn)
+- `frontend/src/components/ui/sonner.tsx` (new — shadcn toast replacement)
+- `frontend/src/components/ui/popover.tsx` (new — shadcn)
+- `frontend/src/components/ui/select.tsx` (new — shadcn)
+- `frontend/src/components/ui/avatar.tsx` (new — shadcn)
+- `frontend/src/components/ui/separator.tsx` (new — shadcn)
+- `frontend/src/components/ui/input.tsx` (new — shadcn)
+- `frontend/src/components/ui/textarea.tsx` (new — shadcn)
+- `frontend/src/components/ui/navigation-menu.tsx` (new — shadcn)
+- `frontend/tailwind.config.ts` (modified — SafeNet color aliases + Inter font family)
+
+### Review Findings
+
+- [x] [Review][Decision] D1: `--sn-border` used instead of AC2-specified `--border` — accepted deviation; AC2 amended to reflect `--sn-border` / `safenet-border` naming
+- [x] [Review][Decision] D2: `Toast` listed in AC3 but `sonner` component shipped — accepted; AC3 amended to reflect `Sonner` as shadcn v4 replacement
+- [x] [Review][Decision] D3: `formatCurrency` default changed from `USD` to `EUR` — reverted to `USD`; currency must be passed explicitly at call sites for EUR formatting [`frontend/src/lib/formatters.ts`]
+- [x] [Review][Decision] D4: Dark mode stack incomplete — fixed: added `darkMode: 'class'` to `tailwind.config.ts`; added `ThemeProvider` from `next-themes` to `providers.tsx`
+- [x] [Review][Decision] D5: `components/common/` and `components/dashboard/` not git-tracked — fixed: added `.gitkeep` files
+- [x] [Review][Patch] P1: `formatRelativeTime` returns `"just now"` for future dates; no day-level display for durations >24h — fixed: added `seconds < 0` guard returns "just now"; added day fallback [`frontend/src/lib/formatters.ts`]
+- [x] [Review][Patch] P2: `formatTimeUntil` returns `"< 1m"` for past dates — fixed: added `seconds <= 0` guard returns `"overdue"` [`frontend/src/lib/formatters.ts`]
+- [x] [Review][Patch] P3: CSS variable self-reference no-op: `.theme { --font-sans: var(--font-sans) }` — fixed: changed to `var(--font-inter)`, removed self-ref [`frontend/src/app/globals.css`]
+- [x] [Review][Patch] P4: `globals.css` missing newline at end of file — fixed [`frontend/src/app/globals.css`]
+- [x] [Review][Patch] P5: `shadcn` listed under `dependencies` — fixed: moved to `devDependencies` [`frontend/package.json`]
+- [x] [Review][Defer] W1: `batchSelection: Set<string>` not JSON-serializable — will silently corrupt if Zustand persist middleware is added later [`frontend/src/stores/uiStore.ts`] — deferred, pre-existing
+- [x] [Review][Defer] W2: `authStore` has no Zustand persistence — intentional design (tokens in httpOnly cookies, middleware handles auth gate) [`frontend/src/stores/authStore.ts`] — deferred, pre-existing
+- [x] [Review][Defer] W3: `QueryClient` SSR hydration boundary undocumented — safe pattern but server prefetch state is not bridged to client [`frontend/src/app/providers.tsx`] — deferred, pre-existing
 
 ### Change Log
 
 - 2026-04-10: Story created by create-story workflow
+- 2026-04-10: Story implementation completed — all 7 tasks done, all ACs satisfied
+- 2026-04-10: Code review completed — 5 decision-needed, 5 patch, 3 deferred, 5 dismissed
