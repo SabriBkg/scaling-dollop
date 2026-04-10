@@ -1,7 +1,4 @@
-from safenet_backend.celery import app
+from core.tasks.scanner import scan_retroactive_failures
+from core.tasks.polling import poll_new_failures, poll_account_failures
 
-
-@app.task
-def poll_failed_payments():
-    """Stub — Story 3.2 implements the full retry engine."""
-    pass
+__all__ = ["scan_retroactive_failures", "poll_new_failures", "poll_account_failures"]

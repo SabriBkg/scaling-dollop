@@ -62,7 +62,7 @@ class StripeConnection(models.Model):
         related_name="stripe_connection",
     )
     _encrypted_access_token = models.TextField(db_column="encrypted_access_token")
-    stripe_user_id = models.CharField(max_length=255)  # Stripe account ID (e.g. acct_xxx)
+    stripe_user_id = models.CharField(max_length=255, unique=True)  # Stripe account ID (e.g. acct_xxx)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

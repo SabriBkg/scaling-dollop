@@ -15,3 +15,15 @@
 
 - `is_within_payday_window` checks only `dt.day in (1, 15)` without converting to UTC — inconsistent with `next_payday_retry_window` which produces UTC-aware windows. Not used in production yet; fix when wiring payday scheduling in Story 3.2.
 - `get_compliant_action` uses an allowlist of non-retry actions (`fraud_flag`, `notify_only`, `no_action`). If new action types are added, they could bypass geo-blocking. The action set is fixed by current spec; revisit if action types expand.
+
+## Deferred from: code review of story-2-1 (2026-04-10)
+
+- Unauthenticated `initiate_stripe_connect` endpoint creates a cache entry per POST with no rate limiting — attacker can flood Redis with `stripe_oauth_state:*` keys. Needs rate limiting middleware or throttle class.
+- Dockerfile runs as root with no `USER` directive and installs Poetry via `curl | python3` without checksum verification. Address when hardening container security.
+- Missing env vars (`STRIPE_REDIRECT_URI`, `STRIPE_CLIENT_ID`, `STRIPE_SECRET_KEY`) cause unhandled `ImproperlyConfigured` crash. Add startup validation or graceful error handling.
+
+## Deferred from: code review of story-2-2 (2026-04-10)
+
+- `Subscriber.email` is `EmailField` but `failure_ingestion.py` stores unvalidated strings from Stripe via `get_or_create` (bypasses Django field validators). Malformed emails could cause downstream failures in email-sending features.
+- No `db_index` on `SubscriberFailure.failure_created_at` — date-range queries will full-scan the table. Add index when dashboard query patterns are established.
+- `get_rule()` in `core/engine/rules.py` crashes on `None` input with `AttributeError` — currently protected by caller defaulting to `"_default"`, but function contract is misleading. Fix when touching the rules engine.

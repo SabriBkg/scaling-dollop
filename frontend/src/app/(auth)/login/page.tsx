@@ -6,6 +6,8 @@ import { setTokens } from "@/lib/auth";
 import { ROUTES } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ConnectStripe } from "@/components/onboarding/ConnectStripe";
+import api from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,26 +22,19 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/auth/token/`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: email, password }),
-        }
-      );
+      const response = await api.post("/auth/token/", {
+        username: email,
+        password,
+      });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data?.detail ?? "Invalid email or password. Please try again.");
-        return;
-      }
-
-      await setTokens(data.access, data.refresh);
+      const { access, refresh } = response.data;
+      await setTokens(access, refresh);
       router.replace(ROUTES.DASHBOARD);
-    } catch {
-      setError("Unable to connect to SafeNet. Please check your connection.");
+    } catch (err: unknown) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail;
+      setError(detail ?? "Invalid email or password. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -80,6 +75,14 @@ export default function LoginPage() {
             {loading ? "Signing in..." : "Sign in"}
           </Button>
         </form>
+
+        <div className="my-6 flex items-center gap-3">
+          <div className="h-px flex-1 bg-border-default" />
+          <span className="text-xs text-text-tertiary">or</span>
+          <div className="h-px flex-1 bg-border-default" />
+        </div>
+
+        <ConnectStripe />
 
         <p className="mt-6 text-center text-xs text-text-tertiary">
           New to SafeNet?{" "}

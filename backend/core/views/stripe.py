@@ -7,17 +7,19 @@ Flow:
 
 The frontend:
   1. Calls /stripe/connect/ → gets oauth_url
-  2. Redirects browser to oauth_url (Stripe Express Connect)
+  2. Redirects browser to oauth_url (Stripe Connect)
   3. Stripe redirects to NEXT_PUBLIC_BASE_URL/register/callback?code=xxx&state=xxx
   4. Callback page calls /stripe/callback/ with {code, state}
   5. Gets back {access, refresh, account_id} → stores cookies → redirects to /dashboard
 """
+import logging
 import secrets
 from datetime import timedelta
 
+import stripe
 from django.contrib.auth.models import User
 from django.core.cache import cache
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from rest_framework import status
@@ -31,8 +33,10 @@ import environ
 from core.models.account import StripeConnection, TIER_MID
 from core.services.audit import write_audit_event
 from core.services.stripe_client import get_oauth_url, exchange_oauth_code, get_stripe_account_email
+from core.tasks.scanner import scan_retroactive_failures
 
 env = environ.Env()
+logger = logging.getLogger("django")
 
 
 @api_view(["POST"])
@@ -75,19 +79,18 @@ def stripe_connect_callback(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Validate CSRF state token
+    # Validate CSRF state token (atomic check-and-delete)
     state_key = f"stripe_oauth_state:{state}"
-    if not cache.get(state_key):
+    if not cache.delete(state_key):
         return Response(
             {"error": {"code": "INVALID_STATE", "message": "OAuth state is invalid or expired. Please try again.", "field": None}},
             status=status.HTTP_400_BAD_REQUEST,
         )
-    cache.delete(state_key)  # One-time use
 
     # Exchange code for Stripe access token
     try:
         stripe_data = exchange_oauth_code(code)
-    except Exception:
+    except stripe.error.StripeError:
         return Response(
             {"error": {"code": "STRIPE_AUTH_FAILED", "message": "Stripe authorization failed. Please try connecting again.", "field": None}},
             status=status.HTTP_400_BAD_REQUEST,
@@ -102,30 +105,36 @@ def stripe_connect_callback(request):
         email = f"{stripe_user_id}@stripe-connect.safenet.local"
 
     # Atomic account creation — no partial records on failure (AC5)
+    is_new_account = False
     try:
         with transaction.atomic():
             # Idempotency check: StripeConnection already exists for this stripe_user_id
-            existing_connection = StripeConnection.objects.filter(
+            existing_connection = StripeConnection.objects.select_for_update().filter(
                 stripe_user_id=stripe_user_id
             ).select_related("account__owner").first()
 
             if existing_connection:
-                # Account already exists — issue new JWT tokens (re-login)
+                # Reconnection — update encrypted token and issue new JWT tokens
+                existing_connection.access_token = access_token
+                existing_connection.save(update_fields=["_encrypted_access_token"])
                 user = existing_connection.account.owner
                 account = existing_connection.account
             else:
-                # New account: create User (signal auto-creates Account) + StripeConnection
-                user, created = User.objects.get_or_create(
+                # Reject if a User with this email already exists (prevent account takeover)
+                if User.objects.filter(email=email).exists():
+                    return Response(
+                        {"error": {"code": "EMAIL_EXISTS", "message": "An account with this email already exists. Please log in instead.", "field": None}},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
+                # New account: create User (post_save signal auto-creates Account)
+                user = User.objects.create_user(
+                    username=email[:150],
                     email=email,
-                    defaults={
-                        "username": email,
-                        "is_staff": False,  # CRITICAL: Never True for client accounts (NFR-S4)
-                        "is_superuser": False,
-                    },
+                    is_staff=False,  # CRITICAL: Never True for client accounts (NFR-S4)
                 )
 
-                # Signal auto-creates Account on User creation.
-                # Update it with tier and trial_ends_at for the 30-day Mid-tier trial (AC3).
+                # Signal creates Account — update with tier and trial (AC3)
                 account = user.account
                 account.tier = TIER_MID
                 account.trial_ends_at = timezone.now() + timedelta(days=30)
@@ -146,13 +155,18 @@ def stripe_connect_callback(request):
                     metadata={"stripe_user_id": stripe_user_id, "tier": TIER_MID, "via": "stripe_oauth"},
                 )
 
+                is_new_account = True
+
     except Exception as exc:
-        import logging
-        logging.getLogger("django").exception("Stripe callback failed: %s", exc)
+        logger.exception("Stripe callback failed: %s", exc)
         return Response(
             {"error": {"code": "ACCOUNT_CREATION_FAILED", "message": "Failed to create your account. Please try again.", "field": None}},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+    # Queue retroactive scan AFTER transaction commits (ensures Account exists in DB)
+    if is_new_account:
+        scan_retroactive_failures.delay(account.id)
 
     # Issue JWT tokens
     refresh = RefreshToken.for_user(user)

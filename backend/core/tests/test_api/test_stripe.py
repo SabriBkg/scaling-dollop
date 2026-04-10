@@ -69,6 +69,13 @@ class TestInitiateStripeConnect:
 
 @pytest.mark.django_db
 class TestStripeConnectCallback:
+    @pytest.fixture(autouse=True)
+    def _mock_scan_task(self):
+        """Prevent scan_retroactive_failures.delay() from hitting Redis."""
+        with patch("core.views.stripe.scan_retroactive_failures") as mock_scan:
+            self._mock_scan = mock_scan
+            yield
+
     def _mock_stripe_exchange(self, access_token="sk_test_xxx", stripe_user_id="acct_test"):
         """Return patches for Stripe token exchange and email lookup."""
         mock_result = {"access_token": access_token, "stripe_user_id": stripe_user_id, "livemode": False}
@@ -127,9 +134,10 @@ class TestStripeConnectCallback:
 
     def test_stripe_exchange_failure_returns_400(self, api_client):
         """If Stripe token exchange fails, return 400 — no partial records."""
+        import stripe
         state = _get_valid_state(api_client)
 
-        with patch("core.views.stripe.exchange_oauth_code", side_effect=Exception("Stripe failed")):
+        with patch("core.views.stripe.exchange_oauth_code", side_effect=stripe.error.AuthenticationError("Stripe failed")):
             response = api_client.post("/api/v1/stripe/callback/", {"code": "bad_code", "state": state})
 
         assert response.status_code == 400
@@ -171,3 +179,35 @@ class TestStripeConnectCallback:
         # trial_ends_at should be roughly 30 days from now (allow 1 minute tolerance)
         expected = now + timedelta(days=30)
         assert abs((account.trial_ends_at - expected).total_seconds()) < 60
+
+    def test_new_account_triggers_retroactive_scan(self, api_client):
+        """New account OAuth triggers scan_retroactive_failures.delay() (AC1 Story 2.2)."""
+        state = _get_valid_state(api_client)
+        exchange_patch, email_patch = self._mock_stripe_exchange()
+
+        with exchange_patch, email_patch:
+            response = api_client.post("/api/v1/stripe/callback/", {"code": "ac_xxx", "state": state})
+
+        assert response.status_code == 200
+        account_id = response.json()["data"]["account_id"]
+        self._mock_scan.delay.assert_called_once_with(account_id)
+
+    def test_reconnection_does_not_trigger_scan(self, api_client):
+        """Reconnecting existing account does NOT trigger retroactive scan."""
+        # First connection
+        state1 = _get_valid_state(api_client)
+        exchange_patch1, email_patch1 = self._mock_stripe_exchange()
+        with exchange_patch1, email_patch1:
+            api_client.post("/api/v1/stripe/callback/", {"code": "ac_xxx", "state": state1})
+
+        # Reset mock call count for second connection check
+        self._mock_scan.reset_mock()
+
+        # Second connection (reconnection)
+        state2 = _get_valid_state(api_client)
+        exchange_patch2, email_patch2 = self._mock_stripe_exchange()
+        with exchange_patch2, email_patch2:
+            response = api_client.post("/api/v1/stripe/callback/", {"code": "ac_xxx_2", "state": state2})
+
+        assert response.status_code == 200
+        self._mock_scan.delay.assert_not_called()

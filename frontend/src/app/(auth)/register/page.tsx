@@ -1,7 +1,8 @@
 "use client";
 
-import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import axios from "axios";
 import { ConnectStripe } from "@/components/onboarding/ConnectStripe";
 import { ROUTES } from "@/lib/constants";
 
@@ -11,6 +12,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing_params: "The connection link was incomplete. Please try connecting again.",
   INVALID_STATE: "Your session expired. Please try connecting again.",
   STRIPE_AUTH_FAILED: "Stripe couldn't verify your authorization. Please try again.",
+  token_storage_failed: "Failed to save your session. Please try again.",
+  EMAIL_EXISTS: "An account with this email already exists. Please sign in instead.",
 };
 
 function RegisterContent() {
@@ -33,6 +36,24 @@ function RegisterContent() {
 }
 
 export default function RegisterPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    (async () => {
+      try {
+        // Use plain axios to avoid the 401 interceptor redirecting to /login
+        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/account/me/`, {
+          withCredentials: true,
+        });
+        if (res.status === 200) {
+          router.replace(ROUTES.DASHBOARD);
+        }
+      } catch {
+        // Not authenticated — stay on register page
+      }
+    })();
+  }, [router]);
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-bg-base">
       <div className="w-full max-w-md px-6 py-12 text-center">

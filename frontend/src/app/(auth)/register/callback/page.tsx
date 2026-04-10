@@ -33,7 +33,12 @@ function CallbackHandler() {
           { code, state }
         );
         const { access, refresh } = response.data.data;
-        await setTokens(access, refresh);
+        const stored = await setTokens(access, refresh);
+        if (!stored) {
+          setStatus("error");
+          router.replace(`${ROUTES.REGISTER}?error=token_storage_failed`);
+          return;
+        }
         router.replace(ROUTES.DASHBOARD);
       } catch (err: unknown) {
         const message =

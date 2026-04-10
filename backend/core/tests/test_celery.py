@@ -12,7 +12,7 @@ def test_celery_beat_schedule_has_hourly_poll():
 
     assert "hourly-retry-poll" in app.conf.beat_schedule
     schedule_entry = app.conf.beat_schedule["hourly-retry-poll"]
-    assert schedule_entry["task"] == "core.tasks.poll_failed_payments"
+    assert schedule_entry["task"] == "core.tasks.polling.poll_new_failures"
     assert schedule_entry["schedule"] == 3600.0
 
 

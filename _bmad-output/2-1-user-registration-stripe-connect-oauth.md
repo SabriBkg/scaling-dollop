@@ -1,6 +1,6 @@
 # Story 2.1: User Registration & Stripe Connect OAuth
 
-Status: review
+Status: done
 
 ## Story
 
@@ -1297,7 +1297,31 @@ Claude Opus 4.6
 - `frontend/src/lib/constants.ts` (modified — added ROUTES.STRIPE_CALLBACK, ROUTES.DASHBOARD)
 - `frontend/.env.local.example` (modified — added NEXT_PUBLIC_BASE_URL)
 
+### Review Findings
+
+- [x] [Review][Decision] F1: Account takeover via email collision — Decision: reject if user already exists (409 EMAIL_EXISTS). Fixed.
+- [x] [Review][Decision] F2: OAuth users have no password set — Decision: added "Login with Stripe" button to login page. Fixed.
+- [x] [Review][Decision] F3: Standard Connect OAuth path used instead of Express Connect — Decision: keep Standard Connect, spec was wrong. Dismissed.
+- [x] [Review][Decision] F4: `requirements.txt` and `requirements-dev.txt` deleted — Decision: keep deletion, Poetry is canonical. Dismissed.
+- [x] [Review][Decision] F5: Middleware redirect changed from `/login` to `/register` — Decision: keep `/register` as default. Dismissed.
+- [x] [Review][Patch] F6: TOCTOU race on CSRF state token — Fixed: atomic `cache.delete` check
+- [x] [Review][Patch] F7: `stripe.api_key` global mutable state — Fixed: pass `api_key` as kwarg
+- [x] [Review][Patch] F8: OAuth URL params not URL-encoded — Fixed: `urllib.parse.urlencode`
+- [x] [Review][Patch] F9: Reconnection path discards new access token — Fixed: update token on reconnection
+- [x] [Review][Patch] F10: Bare `except Exception` — Fixed: catch `OAuthError` and `IntegrityError` specifically
+- [x] [Review][Patch] F11: No `unique` constraint on `stripe_user_id` — Fixed: `unique=True` + `select_for_update` + migration
+- [x] [Review][Patch] F12: Django `username` max_length overflow — Fixed: `email[:150]`
+- [x] [Review][Patch] F13: `setTokens` failure silently ignored — Fixed: check return value, redirect on failure
+- [x] [Review][Patch] F14: Register page missing auth redirect (AC6) — Fixed: added `useEffect` auth check
+- [x] [Review][Patch] F15: Login page uses raw `fetch` — Fixed: replaced with `api.post`
+- [x] [Review][Patch] F16: Signal-created Account vs explicit create — Fixed: explicit `Account.objects.create()`, guarded signal
+- [x] [Review][Patch] F17: `NEXT_PUBLIC_STRIPE_CLIENT_ID` missing — Fixed: added to `.env.local.example`
+- [x] [Review][Defer] F18: Unauthenticated endpoint as cache-flooding DoS vector (needs rate limiting) — deferred, pre-existing
+- [x] [Review][Defer] F19: Dockerfile runs as root + pipes curl to python — deferred, pre-existing
+- [x] [Review][Defer] F20: Missing env vars crash with unhandled `ImproperlyConfigured` — deferred, pre-existing
+
 ### Change Log
 
 - 2026-04-10: Story created by create-story workflow
 - 2026-04-10: All 16 tasks implemented. Backend: Stripe OAuth endpoints, Account tier model, 10 new tests. Frontend: register, login, callback pages, dashboard stub, useStripeConnect hook. All 111 backend tests pass (0 regressions). TypeScript and ESLint clean. Status → review.
+- 2026-04-10: Code review complete. 14 patches applied (security: TOCTOU fix, thread-safe Stripe keys, email collision rejection, unique constraint, URL encoding; UX: Login with Stripe, auth redirect, setTokens error handling, shared api instance). 3 deferred. 3 decisions dismissed (spec deviations accepted). Status → done.
