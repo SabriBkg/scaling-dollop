@@ -18,9 +18,9 @@ export function middleware(request: NextRequest) {
   const token = request.cookies.get("safenet_access")?.value;
 
   if (!token) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("from", pathname);
-    return NextResponse.redirect(loginUrl);
+    const registerUrl = new URL("/register", request.url);
+    registerUrl.searchParams.set("from", pathname);
+    return NextResponse.redirect(registerUrl);
   }
 
   return NextResponse.next();

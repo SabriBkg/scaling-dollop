@@ -14,6 +14,10 @@ export interface User {
 export interface Account {
   id: number;
   owner: User;
+  tier: "free" | "mid" | "pro";
+  trial_ends_at: string | null; // ISO 8601 or null
+  is_on_trial: boolean;
+  stripe_connected: boolean;
   created_at: string; // ISO 8601
 }
 

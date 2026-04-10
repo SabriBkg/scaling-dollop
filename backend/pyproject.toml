@@ -20,10 +20,12 @@ django-cors-headers = "^4.9.0"
 django-redis = "^6.0.0"
 drf-spectacular = "^0.29.0"
 sentry-sdk = "^2.57.0"
+stripe = "^15.0.1"
 
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.3"
+pytest-django = "^4.12.0"
 
 [build-system]
 requires = ["poetry-core"]

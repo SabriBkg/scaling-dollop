@@ -68,7 +68,7 @@ class TestJWTAuth:
     def test_protected_endpoint_accessible_with_jwt(self, auth_client, account):
         response = auth_client.get("/api/v1/account/me/")
         assert response.status_code == 200
-        data = response.json()
+        data = response.json()["data"]
         assert data["id"] == account.id
 
     def test_admin_path_is_disabled(self, client):

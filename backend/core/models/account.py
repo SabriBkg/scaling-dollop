@@ -1,7 +1,19 @@
 from django.contrib.auth.models import User
 from django.db import models
+from django.utils import timezone
 
 from core.services.encryption import encrypt_token, decrypt_token
+
+
+TIER_FREE = "free"
+TIER_MID = "mid"
+TIER_PRO = "pro"
+
+TIER_CHOICES = [
+    (TIER_FREE, "Free"),
+    (TIER_MID, "Mid"),
+    (TIER_PRO, "Pro"),
+]
 
 
 class Account(models.Model):
@@ -16,13 +28,24 @@ class Account(models.Model):
         on_delete=models.CASCADE,
         related_name="account",
     )
+    tier = models.CharField(
+        max_length=10,
+        choices=TIER_CHOICES,
+        default=TIER_MID,
+    )
+    trial_ends_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "core_account"
 
     def __str__(self):
-        return f"Account({self.owner.email})"
+        return f"Account({self.owner.email}, tier={self.tier})"
+
+    @property
+    def is_on_trial(self) -> bool:
+        """True if the account is in the 30-day Mid-tier trial period."""
+        return self.tier == TIER_MID and self.trial_ends_at is not None and timezone.now() < self.trial_ends_at
 
 
 class StripeConnection(models.Model):
