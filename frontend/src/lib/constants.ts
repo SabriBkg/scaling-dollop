@@ -5,4 +5,6 @@ export const ROUTES = {
   REGISTER: "/register",
   STRIPE_CALLBACK: "/register/callback",
   DASHBOARD: "/dashboard",
+  SETTINGS: "/settings",
+  REVIEW_QUEUE: "/review-queue",
 } as const;

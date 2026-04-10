@@ -27,3 +27,11 @@
 - `Subscriber.email` is `EmailField` but `failure_ingestion.py` stores unvalidated strings from Stripe via `get_or_create` (bypasses Django field validators). Malformed emails could cause downstream failures in email-sending features.
 - No `db_index` on `SubscriberFailure.failure_created_at` — date-range queries will full-scan the table. Add index when dashboard query patterns are established.
 - `get_rule()` in `core/engine/rules.py` crashes on `None` input with `AttributeError` — currently protected by caller defaulting to `"_default"`, but function contract is misleading. Fix when touching the rules engine.
+
+## Deferred from: code review of story-2-3 (2026-04-10)
+
+- `useAccount` query fires without auth gate (`enabled` flag) — fires 401 on unauthenticated page loads within dashboard layout. Consider gating with `enabled: !!isAuthenticated`.
+- Dashboard layout flash of unauthenticated shell before middleware redirect — no client-side auth guard in `(dashboard)/layout.tsx`. Relies on middleware + axios 401 interceptor.
+- `useAccount` error state unhandled in consumers — failed account fetch silently degrades WorkspaceIdentity (shows "Workspace" with no owner). No error UI or retry prompt.
+- UserMenu shows "?" avatar before auth hydration completes — no skeleton/loading state for null `user` in authStore.
+- Mobile navigation inaccessible below `md:` breakpoint — nav tabs hidden with no hamburger or fallback. Mobile is read-only MVP; needs a dedicated mobile nav story.
