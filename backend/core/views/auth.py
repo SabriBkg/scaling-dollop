@@ -20,6 +20,16 @@ class SafeNetTokenObtainPairSerializer(TokenObtainPairSerializer):
             token["account_id"] = None
         return token
 
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        # Include profile_complete so the frontend proxy can set the httpOnly cookie
+        try:
+            data["profile_complete"] = self.user.account.profile_complete
+        except AttributeError:
+            data["profile_complete"] = False
+        return data
+
 
 class SafeNetTokenObtainPairView(TokenObtainPairView):
     serializer_class = SafeNetTokenObtainPairSerializer
+    throttle_scope = "auth"

@@ -127,3 +127,17 @@
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+/* Respect prefers-reduced-motion — UX-DR13 */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

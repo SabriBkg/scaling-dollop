@@ -27,9 +27,9 @@ export default function LoginPage() {
         password,
       });
 
-      const { access, refresh } = response.data;
+      const { access, refresh, profile_complete } = response.data;
       await setTokens(access, refresh);
-      router.replace(ROUTES.DASHBOARD);
+      router.replace(profile_complete === false ? ROUTES.REGISTER_COMPLETE : ROUTES.DASHBOARD);
     } catch (err: unknown) {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
@@ -55,15 +55,20 @@ export default function LoginPage() {
             autoComplete="email"
             aria-label="Email address"
           />
-          <Input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-            aria-label="Password"
-          />
+          <div>
+            <Input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              autoComplete="current-password"
+              aria-label="Password"
+            />
+            <p className="mt-1 text-right text-xs text-text-tertiary">
+              <span className="cursor-not-allowed opacity-50">Forgot password?</span>
+            </p>
+          </div>
 
           {error && (
             <p className="text-sm text-accent-fraud" role="alert">
@@ -85,10 +90,7 @@ export default function LoginPage() {
         <ConnectStripe />
 
         <p className="mt-6 text-center text-xs text-text-tertiary">
-          New to SafeNet?{" "}
-          <a href={ROUTES.REGISTER} className="text-cta hover:underline">
-            Connect your Stripe account
-          </a>
+          New to SafeNet? Connect your Stripe account to get started.
         </p>
       </div>
     </main>

@@ -28,18 +28,18 @@ function CallbackHandler() {
 
     (async () => {
       try {
-        const response = await api.post<{ data: { access: string; refresh: string; account_id: number } }>(
+        const response = await api.post<{ data: { access: string; refresh: string; account_id: number; is_new_account: boolean; profile_complete: boolean } }>(
           "/stripe/callback/",
           { code, state }
         );
-        const { access, refresh } = response.data.data;
+        const { access, refresh, profile_complete } = response.data.data;
         const stored = await setTokens(access, refresh);
         if (!stored) {
           setStatus("error");
           router.replace(`${ROUTES.REGISTER}?error=token_storage_failed`);
           return;
         }
-        router.replace(ROUTES.DASHBOARD);
+        router.replace(profile_complete ? ROUTES.DASHBOARD : ROUTES.REGISTER_COMPLETE);
       } catch (err: unknown) {
         const message =
           (err as { response?: { data?: { error?: { code?: string } } } })

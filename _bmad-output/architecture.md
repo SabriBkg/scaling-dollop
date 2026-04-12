@@ -256,6 +256,15 @@ Unknown codes fall through to `_default` — conservative, never fraud-flags. Co
 
 **Client authentication:** `djangorestframework-simplejwt` — JWT access tokens (15-min expiry) + refresh tokens (7-day expiry). Next.js middleware refreshes tokens transparently. Stateless — no server-side session storage.
 
+**Password security:** `argon2-cffi` — Argon2id hashing (OWASP recommended, memory-hard). Configured as primary in `PASSWORD_HASHERS` with PBKDF2 as fallback for any legacy hashes. Django's `AUTH_PASSWORD_VALIDATORS` enabled: minimum 8 characters, common password rejection, user attribute similarity check, numeric-only rejection.
+
+**Rate limiting:** DRF `ScopedRateThrottle` on authentication-sensitive endpoints:
+- `auth` scope: 5 requests/min (login, token refresh)
+- `profile` scope: 3 requests/min (profile completion)
+- `password_reset` scope: 3 requests/email/hour (password reset requests — Epic 4)
+
+**Profile completion endpoint:** `POST /api/v1/accounts/complete-profile/` — JWT auth required, one-time operation (rejects if `company_name` already set). Server-side validation of password match and strength. Audit logged via `write_audit_event()`.
+
 **Stripe token encryption:**
 ```python
 # cryptography.fernet — AES-128-CBC with HMAC

@@ -9,7 +9,7 @@ export function useAccount() {
     queryKey: ["account", "me"],
     queryFn: async () => {
       const { data } = await api.get<ApiResponse<Account>>(
-        "/accounts/me/"
+        "/account/me/"
       );
       return data.data;
     },

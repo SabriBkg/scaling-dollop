@@ -9,3 +9,4 @@ services:
   frontend:
     environment:
       - WATCHPACK_POLLING=true  # Required for hot-reload inside Docker on some systems
+      - BACKEND_INTERNAL_URL=http://web:8000/api/v1

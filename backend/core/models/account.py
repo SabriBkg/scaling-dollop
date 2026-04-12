@@ -34,6 +34,7 @@ class Account(models.Model):
         default=TIER_MID,
     )
     trial_ends_at = models.DateTimeField(null=True, blank=True)
+    company_name = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -41,6 +42,15 @@ class Account(models.Model):
 
     def __str__(self):
         return f"Account({self.owner.email}, tier={self.tier})"
+
+    @property
+    def profile_complete(self) -> bool:
+        """True if the owner has completed their profile (name + company + password)."""
+        return bool(
+            self.company_name
+            and self.owner.first_name
+            and self.owner.has_usable_password()
+        )
 
     @property
     def is_on_trial(self) -> bool:

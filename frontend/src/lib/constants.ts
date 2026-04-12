@@ -4,6 +4,7 @@ export const ROUTES = {
   LOGIN: "/login",
   REGISTER: "/register",
   STRIPE_CALLBACK: "/register/callback",
+  REGISTER_COMPLETE: "/register/complete",
   DASHBOARD: "/dashboard",
   SETTINGS: "/settings",
   REVIEW_QUEUE: "/review-queue",

@@ -1,4 +1,5 @@
 export * from "./account";
+export * from "./auth";
 
 export type ApiResponse<T> = {
   data: T;

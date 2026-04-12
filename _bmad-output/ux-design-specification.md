@@ -96,12 +96,13 @@ The Data Processing Agreement (DPA) is a **formal legal step**, presented as a d
 **Onboarding sequence:**
 1. Land on marketing site
 2. Connect with Stripe (OAuth, one click)
-3. Retroactive scan runs (animated, 8 seconds)
-4. Dashboard populates — first insight delivered, no action required
-5. CTA: "Activate recovery engine" → 30-day trial
-6. DPA presented as formal step — explicit signature/acceptance
-7. Autopilot / Supervised selection
-8. Engine activates
+3. Profile completion: first name, last name, company/SaaS name, password
+4. Redirect to dashboard (retroactive scan running in background)
+5. Dashboard populates — first insight delivered, no action required
+6. CTA: "Activate recovery engine" → 30-day trial
+7. DPA presented as formal step — explicit signature/acceptance
+8. Autopilot / Supervised selection
+9. Engine activates
 
 ### Critical Success Moments
 

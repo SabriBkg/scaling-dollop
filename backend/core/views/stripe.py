@@ -177,5 +177,7 @@ def stripe_connect_callback(request):
             "access": str(refresh.access_token),
             "refresh": str(refresh),
             "account_id": account.id,
+            "is_new_account": is_new_account,
+            "profile_complete": account.profile_complete,
         }
     })

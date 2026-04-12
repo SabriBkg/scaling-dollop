@@ -458,12 +458,14 @@ See **Product Scope → Growth Features** and **Vision** sections for the full p
 
 ### Account & Onboarding
 
-- **FR1:** A new user can connect their Stripe account to SafeNet via OAuth without handling API keys
+- **FR1:** A new user can connect their Stripe account to SafeNet via OAuth without handling API keys — after OAuth authorization, the user completes a one-time profile setup (name, company name, password) before reaching the dashboard
 - **FR2:** SafeNet can perform a retroactive 90-day payment failure scan immediately after Stripe Connect authorization
 - **FR3:** A client must acknowledge and sign a Data Processing Agreement before the recovery engine is activated
 - **FR4:** A client can choose between Supervised mode and Autopilot mode as their retry authorization model
 - **FR5:** A client can switch between Supervised and Autopilot mode at any time after initial setup
 - **FR48:** Each client account supports exactly one user at MVP — multi-user access and team invitations are not available
+- **FR49:** After Stripe Connect authorization, a new user must provide their full name, company/SaaS product name, and set a password before accessing the dashboard — this profile completion step is mandatory for first-time users and enables email/password login on subsequent visits
+- **FR50:** A user who forgets their password can recover access via Stripe OAuth re-authentication on the login page; a full email-based password reset flow is available once the transactional email system is operational (Epic 4)
 
 ### Payment Failure Detection
 

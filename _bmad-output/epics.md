@@ -400,6 +400,58 @@ So that I can access my payment failure data without handling any API keys.
 
 ---
 
+### Story 2.1b: Post-OAuth Profile Completion & Login Flow Fix
+
+As a new founder who just connected Stripe,
+I want to set my name, company name, and password before seeing the dashboard,
+So that my workspace is personalized, emails reference my brand, and I can log in with email/password on future visits.
+
+**Acceptance Criteria:**
+
+**Given** a new user completes Stripe OAuth authorization
+**When** the callback succeeds and a new account is created
+**Then** the user is redirected to `/register/complete` (not the dashboard)
+**And** they see a form collecting: first name, last name, company/SaaS name, and password with confirmation (FR49)
+
+**Given** the profile completion form
+**When** the user submits valid data
+**Then** the User record is updated with `first_name`, `last_name`, and a hashed password (Argon2)
+**And** the Account record is updated with `company_name`
+**And** Django's full password validation suite is applied server-side (min 8 chars, common password check, similarity check)
+**And** `password` and `password_confirm` are validated to match server-side
+**And** the endpoint rejects repeat submissions with 400 if profile is already completed
+**And** the profile completion is recorded in the audit log via `write_audit_event()`
+**And** the user is redirected to the dashboard
+
+**Given** a returning user who has completed profile setup
+**When** they visit the login page
+**Then** they can log in with email and password
+**And** receive JWT tokens and are redirected to the dashboard
+
+**Given** an existing user with a completed profile
+**When** they click "Connect with Stripe" on the login page
+**Then** the OAuth callback recognizes their account by `stripe_user_id`
+**And** issues JWT tokens and redirects to the dashboard (no profile re-prompt)
+**And** this serves as a password recovery fallback (FR50)
+
+**Given** a user who completed OAuth but abandoned profile completion
+**When** they return (via Stripe re-auth or any authenticated route)
+**Then** they are redirected to `/register/complete` — profile setup cannot be bypassed
+
+**Given** the login endpoint and profile completion endpoint
+**When** either receives requests
+**Then** rate limiting is enforced: 5/min on login, 3/min on profile completion
+
+**Technical notes:**
+- Add `argon2-cffi` dependency; configure `Argon2PasswordHasher` as primary in `PASSWORD_HASHERS`
+- Add `company_name` CharField(max_length=200) to Account model + migration
+- New endpoint: `POST /api/v1/accounts/complete-profile/` (JWT auth required)
+- Update `GET /api/v1/accounts/me/` to return `first_name`, `last_name`, `company_name`
+- DRF `ScopedRateThrottle` on auth and profile endpoints
+- Frontend `middleware.ts` checks profile completion, redirects if incomplete
+
+---
+
 ### Story 2.2: 90-Day Retroactive Scan Background Job
 
 As a newly connected founder,
@@ -733,7 +785,7 @@ So that I can spot fraud flags and urgent cases without scanning the entire subs
 
 Mid-tier clients' subscribers receive compliant, branded email notifications — making the end-customer experience indistinguishable from a well-run in-house billing operation.
 
-**FRs covered:** FR22, FR23, FR24, FR25, FR26, FR27, FR28
+**FRs covered:** FR22, FR23, FR24, FR25, FR26, FR27, FR28, FR50
 **UX-DRs covered:** UX-DR17
 
 ### Story 4.1: Resend Integration & Branded Failure Notification Email
@@ -837,6 +889,43 @@ So that my communication preferences are respected without affecting my account 
 **When** evaluating whether to send a notification
 **Then** the opt-out check occurs before every notification action — no notification is ever sent without this check
 **And** the check is scoped per subscriber+account pair (not globally across accounts)
+
+---
+
+### Story 4.5: Email-Based Password Reset Flow
+
+As a founder who has forgotten my password,
+I want to reset it via email,
+So that I can regain access to my account without re-authorizing through Stripe.
+
+**Acceptance Criteria:**
+
+**Given** the login page
+**When** a user clicks "Forgot password?"
+**Then** they are prompted to enter their email address
+**And** a password reset email is sent via Resend (same transactional email provider as notifications)
+**And** the response is generic regardless of whether the email exists ("If an account exists, we've sent a reset link") — no email enumeration
+
+**Given** a valid password reset email
+**When** the user clicks the reset link
+**Then** they are taken to a password reset form with a time-limited token (1 hour expiry, single-use)
+**And** the token is generated via Django's `PasswordResetTokenGenerator` (no DB storage needed)
+
+**Given** the password reset form
+**When** the user submits a new password
+**Then** the password is validated (same rules as profile completion: min 8 chars, Django validators)
+**And** the password is updated and the reset token is invalidated
+**And** the event is recorded in the audit log
+
+**Given** password reset requests
+**When** rate limiting is checked
+**Then** a maximum of 3 reset requests per email per hour is enforced
+
+**Technical notes:**
+- Uses Resend infrastructure from Story 4.1
+- Django's `PasswordResetTokenGenerator` for signed, time-limited tokens
+- No additional DB models needed — tokens are stateless (signed with SECRET_KEY)
+- Audit log: `action="password_reset_requested"` and `action="password_reset_completed"`
 
 ---
 

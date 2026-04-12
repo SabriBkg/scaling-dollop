@@ -1,12 +1,28 @@
-// Story 2.3 implements the full dashboard shell and navigation
-// Story 2.2 implements the retroactive scan job
+"use client";
+
+import { useDashboardSummary } from "@/hooks/useDashboardSummary";
+import { StoryArcPanel, StoryArcPanelSkeleton } from "@/components/dashboard/StoryArcPanel";
+import { DeclineBreakdown, DeclineBreakdownSkeleton } from "@/components/dashboard/DeclineBreakdown";
+import { UpgradeCTA } from "@/components/dashboard/UpgradeCTA";
+
 export default function DashboardPage() {
+  const { data, isLoading } = useDashboardSummary();
+
   return (
-    <main className="flex min-h-screen items-center justify-center bg-bg-base">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-text-primary mb-2">Your account is ready.</h1>
-        <p className="text-text-secondary">SafeNet is scanning your last 90 days of payment data.</p>
-      </div>
-    </main>
+    <div className="flex flex-col gap-6">
+      {isLoading || !data ? (
+        <>
+          <StoryArcPanelSkeleton />
+          <DeclineBreakdownSkeleton />
+        </>
+      ) : (
+        <>
+          <StoryArcPanel data={data} column2Footer={<UpgradeCTA />} />
+          {data.decline_breakdown.length > 0 && (
+            <DeclineBreakdown entries={data.decline_breakdown} />
+          )}
+        </>
+      )}
+    </div>
   );
 }

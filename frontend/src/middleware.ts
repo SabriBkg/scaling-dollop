@@ -23,6 +23,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(registerUrl);
   }
 
+  // Profile completion guard: authenticated users must complete their profile
+  const profileComplete = request.cookies.get("safenet_profile_complete")?.value;
+  if (!profileComplete) {
+    const completeUrl = new URL("/register/complete", request.url);
+    return NextResponse.redirect(completeUrl);
+  }
+
   return NextResponse.next();
 }
 

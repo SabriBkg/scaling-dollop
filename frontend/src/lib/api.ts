@@ -1,9 +1,9 @@
 /**
  * Configured axios instance for all SafeNet API calls.
  *
- * Auth tokens are stored in httpOnly cookies — they are automatically sent
- * with every request via `withCredentials: true`. No client-side token
- * injection needed.
+ * All API requests are routed through the Next.js API proxy at /api/proxy/,
+ * which reads the httpOnly access cookie and forwards to Django with an
+ * Authorization: Bearer header. This keeps tokens out of client-side JS.
  *
  * On 401: attempts silent token refresh via the server-side cookie bridge,
  * then retries the original request. On refresh failure: clears cookies
@@ -14,7 +14,7 @@ import axios from "axios";
 import { clearTokens } from "./auth";
 
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  baseURL: "/api/proxy",
   headers: { "Content-Type": "application/json" },
   withCredentials: true,
 });

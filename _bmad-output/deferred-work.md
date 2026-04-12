@@ -35,3 +35,14 @@
 - `useAccount` error state unhandled in consumers — failed account fetch silently degrades WorkspaceIdentity (shows "Workspace" with no owner). No error UI or retry prompt.
 - UserMenu shows "?" avatar before auth hydration completes — no skeleton/loading state for null `user` in authStore.
 - Mobile navigation inaccessible below `md:` breakpoint — nav tabs hidden with no hamburger or fallback. Mobile is read-only MVP; needs a dedicated mobile nav story.
+
+## Deferred from: code review of story-2-4 (2026-04-11)
+
+- `toLocaleString()` locale-dependent number formatting — `total_failures.toLocaleString()` renders differently per browser locale (e.g., "1.000" in German vs "1,000" in English). Pre-existing pattern across the frontend.
+- `recovery_rate` can theoretically exceed 100% — no model-level constraint prevents `recovered_count > total_subscribers` from data inconsistency. Needs database-level validation when touching the recovery engine.
+- Frontend `recovery_action` TypeScript union vs backend string field — DB `classified_action` allows any string up to 50 chars but TS type restricts to 4 known values. If new actions are added to `DECLINE_RULES`, frontend silently falls back to wrong indicator color.
+
+## Deferred from: code review of story-2-1b (2026-04-12)
+
+- `ScopedRateThrottle` in `DEFAULT_THROTTLE_CLASSES` silently passes endpoints without a `throttle_scope` — `AllowAny` endpoints like `initiate_stripe_connect` and `stripe_connect_callback` have no rate limiting. An attacker could flood the cache with state tokens or exhaust DB connections. [backend/safenet_backend/settings/base.py:103]
+- `stripe.error.StripeError` may not exist in Stripe SDK v15 — `backend/core/views/stripe.py:93` catches `stripe.error.StripeError` but Stripe v15 moved exceptions to `stripe.StripeError`. Falls through to generic exception handler. [backend/core/views/stripe.py:93]

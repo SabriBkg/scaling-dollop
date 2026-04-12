@@ -1,0 +1,147 @@
+
+<style>
+#erd svg { width: 100%; height: auto; }
+#erd svg.erDiagram .divider path { stroke-opacity: 0.5; }
+#erd svg.erDiagram .row-rect-odd path,
+#erd svg.erDiagram .row-rect-odd rect,
+#erd svg.erDiagram .row-rect-even path,
+#erd svg.erDiagram .row-rect-even rect { stroke: none !important; }
+</style>
+<div id="erd" style="padding: 4px 0;"></div>
+<script type="module">
+import mermaid from 'https://esm.sh/mermaid@11/dist/mermaid.esm.min.mjs';
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+await document.fonts.ready;
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'base',
+  fontFamily: '"Anthropic Sans", sans-serif',
+  themeVariables: {
+    darkMode: dark,
+    fontSize: '13px',
+    fontFamily: '"Anthropic Sans", sans-serif',
+    lineColor: dark ? '#9c9a92' : '#73726c',
+    textColor: dark ? '#c2c0b6' : '#3d3d3a',
+  },
+});
+const diagram = `erDiagram
+  User ||--|| Account : owns
+  Account ||--o| StripeConnection : has
+  Account ||--o| DPAAcceptance : signs
+  Account ||--o{ Subscriber : scopes
+  Subscriber ||--o{ SubscriberFailure : has
+  SubscriberFailure ||--o{ RetrySchedule : queues
+  Subscriber ||--o{ NotificationLog : receives
+  Subscriber ||--o{ AuditLog : recorded-in
+  Subscriber ||--o| NotificationOptOut : may-have
+
+  User {
+    uuid id PK
+    string email
+    string password_hash
+    bool is_staff
+    timestamp created_at
+  }
+  Account {
+    uuid id PK
+    uuid owner_id FK
+    string stripe_user_id
+    string tier
+    timestamp trial_ends_at
+    string engine_mode
+    string notification_tone
+    bool dpa_accepted
+  }
+  StripeConnection {
+    uuid id PK
+    uuid account_id FK
+    string encrypted_key
+    string stripe_user_id
+    timestamp connected_at
+  }
+  DPAAcceptance {
+    uuid id PK
+    uuid account_id FK
+    timestamp signed_at
+    string ip_address
+  }
+  Subscriber {
+    uuid id PK
+    uuid account_id FK
+    string email
+    string stripe_customer_id
+    string status
+    timestamp status_changed_at
+    int retry_count
+  }
+  SubscriberFailure {
+    uuid id PK
+    uuid account_id FK
+    uuid subscriber_id FK
+    string payment_intent_id
+    string decline_code
+    int amount_cents
+    string payment_method_country
+    string failure_status
+    timestamp created_at
+    timestamp recovered_at
+  }
+  RetrySchedule {
+    uuid id PK
+    uuid account_id FK
+    uuid failure_id FK
+    timestamp scheduled_at
+    string result
+    timestamp fired_at
+  }
+  NotificationLog {
+    uuid id PK
+    uuid account_id FK
+    uuid subscriber_id FK
+    string notification_type
+    string tone_preset
+    string outcome
+    timestamp sent_at
+  }
+  NotificationOptOut {
+    uuid id PK
+    uuid account_id FK
+    string subscriber_email
+    timestamp opted_out_at
+  }
+  AuditLog {
+    uuid id PK
+    uuid account_id FK
+    uuid subscriber_id FK
+    string actor
+    string action
+    string outcome
+    jsonb metadata
+    timestamp created_at
+  }
+`;
+const { svg } = await mermaid.render('erd-svg', diagram);
+document.getElementById('erd').innerHTML = svg;
+document.querySelectorAll('#erd svg.erDiagram .node').forEach(node => {
+  const firstPath = node.querySelector('path[d]');
+  if (!firstPath) return;
+  const d = firstPath.getAttribute('d');
+  const nums = d.match(/-?[\d.]+/g)?.map(Number);
+  if (!nums || nums.length < 8) return;
+  const xs = [nums[0], nums[2], nums[4], nums[6]];
+  const ys = [nums[1], nums[3], nums[5], nums[7]];
+  const x = Math.min(...xs), y = Math.min(...ys);
+  const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', x); rect.setAttribute('y', y);
+  rect.setAttribute('width', w); rect.setAttribute('height', h);
+  rect.setAttribute('rx', '8');
+  for (const a of ['fill', 'stroke', 'stroke-width', 'class', 'style']) {
+    if (firstPath.hasAttribute(a)) rect.setAttribute(a, firstPath.getAttribute(a));
+  }
+  firstPath.replaceWith(rect);
+});
+document.querySelectorAll('#erd svg.erDiagram .row-rect-odd path, #erd svg.erDiagram .row-rect-even path').forEach(p => {
+  p.setAttribute('stroke', 'none');
+});
+</script>
