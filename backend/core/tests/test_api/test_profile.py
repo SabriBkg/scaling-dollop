@@ -125,6 +125,36 @@ class TestAccountDetail:
         data = response.json()["data"]
         assert data["profile_complete"] is False
 
+    def test_tier_computed_fields_present(self, auth_client, account):
+        response = auth_client.get(self.URL)
+        data = response.json()["data"]
+        assert "trial_days_remaining" in data
+        assert "next_scan_at" in data
+        assert "engine_active" in data
+
+    def test_trial_days_remaining_on_trial(self, auth_client, account):
+        from django.utils import timezone
+        from datetime import timedelta
+        account.tier = "mid"
+        account.trial_ends_at = timezone.now() + timedelta(days=15)
+        account.save()
+
+        response = auth_client.get(self.URL)
+        data = response.json()["data"]
+        assert data["trial_days_remaining"] == 14 or data["trial_days_remaining"] == 15
+
+    def test_engine_active_for_mid(self, auth_client, account):
+        account.tier = "mid"
+        account.save()
+        response = auth_client.get(self.URL)
+        assert response.json()["data"]["engine_active"] is True
+
+    def test_engine_inactive_for_free(self, auth_client, account):
+        account.tier = "free"
+        account.save()
+        response = auth_client.get(self.URL)
+        assert response.json()["data"]["engine_active"] is False
+
 
 @pytest.mark.django_db
 class TestLoginThrottle:

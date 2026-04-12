@@ -4,6 +4,7 @@ from core.views.health import health_check
 from core.views.account import account_detail, complete_profile
 from core.views.dashboard import dashboard_summary
 from core.views.stripe import initiate_stripe_connect, stripe_connect_callback
+from core.views.billing import stripe_billing_webhook, create_checkout_session
 
 urlpatterns = [
     path("health/", health_check, name="health_check"),
@@ -12,4 +13,6 @@ urlpatterns = [
     path("v1/dashboard/summary/", dashboard_summary, name="dashboard_summary"),
     path("v1/stripe/connect/", initiate_stripe_connect, name="stripe_connect"),
     path("v1/stripe/callback/", stripe_connect_callback, name="stripe_callback"),
+    path("v1/billing/webhook/", stripe_billing_webhook, name="stripe_billing_webhook"),
+    path("v1/billing/checkout/", create_checkout_session, name="create_checkout_session"),
 ]

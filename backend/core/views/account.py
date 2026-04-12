@@ -6,8 +6,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
+from django.core.cache import cache
+from django.utils import timezone
+
 from core.serializers.account import CompleteProfileSerializer
 from core.services.audit import write_audit_event
+from core.services.tier import get_polling_frequency, is_engine_active
 
 
 @api_view(["GET"])
@@ -20,6 +24,20 @@ def account_detail(request):
         raise NotFound("No account associated with this user.")
 
     has_stripe = hasattr(account, "stripe_connection")
+
+    # Computed fields for tier display
+    trial_days_remaining = None
+    if account.is_on_trial and account.trial_ends_at:
+        trial_days_remaining = max(0, (account.trial_ends_at - timezone.now()).days)
+
+    next_scan_at = None
+    from core.models.account import TIER_FREE
+    if account.tier == TIER_FREE:
+        poll_cache_key = f"poll:last_run:{account.id}"
+        last_poll = cache.get(poll_cache_key)
+        if last_poll:
+            from datetime import timedelta
+            next_scan_at = (last_poll + timedelta(seconds=get_polling_frequency(account))).isoformat()
 
     return Response({
         "data": {
@@ -35,6 +53,9 @@ def account_detail(request):
             "tier": account.tier,
             "trial_ends_at": account.trial_ends_at.isoformat() if account.trial_ends_at else None,
             "is_on_trial": account.is_on_trial,
+            "trial_days_remaining": trial_days_remaining,
+            "next_scan_at": next_scan_at,
+            "engine_active": is_engine_active(account),
             "stripe_connected": has_stripe,
             "profile_complete": account.profile_complete,
             "created_at": account.created_at.isoformat(),

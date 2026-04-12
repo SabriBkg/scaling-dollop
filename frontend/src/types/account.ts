@@ -19,6 +19,9 @@ export interface Account {
   tier: "free" | "mid" | "pro";
   trial_ends_at: string | null; // ISO 8601 or null
   is_on_trial: boolean;
+  trial_days_remaining: number | null;
+  next_scan_at: string | null;
+  engine_active: boolean;
   stripe_connected: boolean;
   profile_complete: boolean;
   created_at: string; // ISO 8601

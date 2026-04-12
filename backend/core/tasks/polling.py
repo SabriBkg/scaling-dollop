@@ -10,9 +10,10 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from safenet_backend.celery import app
-from core.models.account import Account, StripeConnection
+from core.models.account import Account, StripeConnection, TIER_FREE
 from core.services.audit import write_audit_event
 from core.services.failure_ingestion import ingest_failed_payment
+from core.services.tier import get_polling_frequency
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,24 @@ def poll_account_failures(self, account_id):
 
     account = connection.account
     cache_key = POLL_LAST_RUN_KEY.format(account_id=account_id)
+
+    # Free-tier frequency gating: skip if not due for next poll
+    if account.tier == TIER_FREE:
+        last_run_ts = cache.get(cache_key)
+        if last_run_ts:
+            freq = get_polling_frequency(account)
+            elapsed = (timezone.now() - last_run_ts).total_seconds()
+            if elapsed < freq:
+                write_audit_event(
+                    subscriber=None,
+                    actor="engine",
+                    action="polling_skipped_free_tier",
+                    outcome="skipped",
+                    account=account,
+                    metadata={"account_id": account_id, "next_due_in_seconds": int(freq - elapsed)},
+                )
+                logger.info("Free-tier account %s not due for poll, skipping", account_id)
+                return {"account_id": account_id, "skipped_free_tier": True}
 
     # Check for missed cycle (AC5: alert within 90 minutes)
     last_run_ts = cache.get(cache_key)

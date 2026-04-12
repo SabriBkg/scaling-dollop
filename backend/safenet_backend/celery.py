@@ -15,4 +15,8 @@ app.conf.beat_schedule = {
         "task": "core.tasks.polling.poll_new_failures",
         "schedule": 3600.0,
     },
+    "daily-trial-expiration": {
+        "task": "core.tasks.trial_expiration.expire_trials",
+        "schedule": 86400.0,
+    },
 }

@@ -157,3 +157,52 @@ class TestPollAccountFailures:
         """Gracefully skips if StripeConnection no longer exists."""
         result = poll_account_failures(account.id)
         assert result["skipped"] is True
+
+    def test_free_tier_skips_when_not_due(self, account):
+        """Free-tier accounts skip polling when last poll was recent."""
+        from core.models.account import TIER_FREE
+        account.tier = TIER_FREE
+        account.save()
+        _make_stripe_connection(account)
+
+        # Set last poll to 1 day ago — far less than 15-day Free interval
+        cache_key = POLL_LAST_RUN_KEY.format(account_id=account.id)
+        cache.set(cache_key, timezone.now() - timedelta(days=1))
+
+        result = poll_account_failures(account.id)
+        assert result["skipped_free_tier"] is True
+
+    def test_free_tier_polls_when_due(self, account):
+        """Free-tier accounts poll when enough time has passed."""
+        from core.models.account import TIER_FREE
+        account.tier = TIER_FREE
+        account.save()
+        _make_stripe_connection(account)
+
+        # Set last poll to 16 days ago — past the 15-day Free interval
+        cache_key = POLL_LAST_RUN_KEY.format(account_id=account.id)
+        cache.set(cache_key, timezone.now() - timedelta(days=16))
+
+        mock_list = MagicMock()
+        mock_list.auto_paging_iter.return_value = []
+
+        with patch("core.tasks.polling.stripe.PaymentIntent.list", return_value=mock_list):
+            result = poll_account_failures(account.id)
+
+        assert "skipped_free_tier" not in result
+        assert result["new_failures"] == 0
+
+    def test_free_tier_polls_on_first_run(self, account):
+        """Free-tier accounts poll if no previous poll exists (first run)."""
+        from core.models.account import TIER_FREE
+        account.tier = TIER_FREE
+        account.save()
+        _make_stripe_connection(account)
+
+        mock_list = MagicMock()
+        mock_list.auto_paging_iter.return_value = []
+
+        with patch("core.tasks.polling.stripe.PaymentIntent.list", return_value=mock_list):
+            result = poll_account_failures(account.id)
+
+        assert "skipped_free_tier" not in result
