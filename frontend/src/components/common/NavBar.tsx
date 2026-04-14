@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEngineStatus } from "@/hooks/useEngineStatus";
+import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { ROUTES } from "@/lib/constants";
 import { WorkspaceIdentity } from "./WorkspaceIdentity";
 import { EngineStatusIndicator } from "./EngineStatusIndicator";
@@ -18,6 +19,11 @@ interface NavTab {
 export function NavBar() {
   const pathname = usePathname();
   const engineStatus = useEngineStatus();
+  const { data: dashboardData } = useDashboardSummary();
+  const pendingCount =
+    engineStatus.mode === "supervised"
+      ? dashboardData?.pending_action_count ?? 0
+      : 0;
 
   const tabs: NavTab[] = [
     { label: "Dashboard", href: ROUTES.DASHBOARD },
@@ -52,6 +58,11 @@ export function NavBar() {
                 }`}
               >
                 {tab.label}
+                {tab.href === ROUTES.REVIEW_QUEUE && pendingCount > 0 && (
+                  <span className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--accent-active)] px-1.5 text-xs font-medium text-white">
+                    {pendingCount}
+                  </span>
+                )}
                 {isActive && (
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--accent-active)]" />
                 )}

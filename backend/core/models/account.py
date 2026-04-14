@@ -34,6 +34,13 @@ class Account(models.Model):
         default=TIER_MID,
     )
     trial_ends_at = models.DateTimeField(null=True, blank=True)
+    dpa_accepted_at = models.DateTimeField(null=True, blank=True)
+    engine_mode = models.CharField(
+        max_length=20,
+        choices=[("autopilot", "Autopilot"), ("supervised", "Supervised")],
+        null=True,
+        blank=True,
+    )
     company_name = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -51,6 +58,11 @@ class Account(models.Model):
             and self.owner.first_name
             and self.owner.has_usable_password()
         )
+
+    @property
+    def dpa_accepted(self) -> bool:
+        """True if the account has accepted the Data Processing Agreement."""
+        return self.dpa_accepted_at is not None
 
     @property
     def is_on_trial(self) -> bool:

@@ -19,4 +19,8 @@ app.conf.beat_schedule = {
         "task": "core.tasks.trial_expiration.expire_trials",
         "schedule": 86400.0,
     },
+    "retry-dispatcher-15min": {
+        "task": "core.tasks.retry.execute_pending_retries",
+        "schedule": 900.0,
+    },
 }

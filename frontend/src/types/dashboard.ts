@@ -15,4 +15,5 @@ export interface DashboardSummary {
   recovery_rate: number;
   net_benefit_cents: number;
   decline_breakdown: DeclineBreakdownEntry[];
+  pending_action_count: number;
 }

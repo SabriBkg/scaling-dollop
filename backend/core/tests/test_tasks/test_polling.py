@@ -43,6 +43,7 @@ def _make_payment_intent(pi_id="pi_poll1", decline_code="expired_card", amount=2
     charge = MagicMock()
     charge.billing_details.email = "poll@example.com"
     charge.payment_method_details.card.country = "GB"
+    charge.payment_method_details.card.fingerprint = "fp_test_polling"
     pi.charges.data = [charge]
 
     return pi

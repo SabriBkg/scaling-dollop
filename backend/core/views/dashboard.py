@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from core.engine.labels import DECLINE_CODE_LABELS
 from core.engine.rules import DECLINE_RULES
 from core.engine.state_machine import STATUS_RECOVERED
+from core.models.pending_action import PendingAction, STATUS_PENDING
 from core.models.subscriber import Subscriber, SubscriberFailure
 from core.serializers.dashboard import DashboardSummarySerializer
 
@@ -97,6 +98,13 @@ def _build_summary(account_id):
             }
         )
 
+    # Pending action count for Supervised mode badge
+    pending_action_count = (
+        PendingAction.objects.for_account(account_id)
+        .filter(status=STATUS_PENDING)
+        .count()
+    )
+
     return {
         "total_failures": total_failures,
         "total_subscribers": total_subscribers,
@@ -106,6 +114,7 @@ def _build_summary(account_id):
         "recovery_rate": recovery_rate,
         "net_benefit_cents": net_benefit_cents,
         "decline_breakdown": decline_breakdown,
+        "pending_action_count": pending_action_count,
     }
 
 

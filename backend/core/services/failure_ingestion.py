@@ -38,6 +38,16 @@ def ingest_failed_payment(account, payment_intent) -> tuple[Subscriber, Subscrib
             if card:
                 payment_method_country = getattr(card, "country", None)
 
+    # Extract card fingerprint for card-update detection baseline
+    card_fingerprint = None
+    if charges and charges.data:
+        charge = charges.data[0]
+        pm_details_fp = getattr(charge, "payment_method_details", None)
+        if pm_details_fp:
+            card_fp = getattr(pm_details_fp, "card", None)
+            if card_fp:
+                card_fingerprint = getattr(card_fp, "fingerprint", None)
+
     # Classify via decline rules
     rule = get_rule(decline_code)
     classified_action = rule["action"]
@@ -49,9 +59,16 @@ def ingest_failed_payment(account, payment_intent) -> tuple[Subscriber, Subscrib
         defaults={"email": email},
     )
     # Update email if we have one and subscriber didn't
+    update_fields = []
     if email and not subscriber.email:
         subscriber.email = email
-        subscriber.save(update_fields=["email"])
+        update_fields.append("email")
+    # Populate initial fingerprint if not set (establishes baseline)
+    if card_fingerprint and not subscriber.last_payment_method_fingerprint:
+        subscriber.last_payment_method_fingerprint = card_fingerprint
+        update_fields.append("last_payment_method_fingerprint")
+    if update_fields:
+        subscriber.save(update_fields=update_fields)
 
     # Parse Stripe timestamp
     failure_created_at = datetime.fromtimestamp(payment_intent.created, tz=timezone.utc)

@@ -6,6 +6,7 @@ import logging
 import stripe
 import environ
 from django.core.cache import cache
+from django.db import transaction
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -15,12 +16,20 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from core.models.account import Account, TIER_FREE
+from core.models.account import Account, TIER_FREE, TIER_MID
 from core.services.audit import write_audit_event
 from core.services.tier import upgrade_to_mid
 
 env = environ.Env()
 logger = logging.getLogger(__name__)
+
+STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
+STRIPE_MID_TIER_PRICE_ID = env("STRIPE_MID_TIER_PRICE_ID", default="")
+
+if not STRIPE_WEBHOOK_SECRET:
+    logger.warning("STRIPE_WEBHOOK_SECRET is not set — webhook signature verification will fail")
+if not STRIPE_MID_TIER_PRICE_ID:
+    logger.warning("STRIPE_MID_TIER_PRICE_ID is not set — checkout session creation will fail")
 
 
 @csrf_exempt
@@ -33,10 +42,16 @@ def stripe_billing_webhook(request):
     payload = request.body
     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE", "")
 
+    if not STRIPE_WEBHOOK_SECRET:
+        logger.error("STRIPE_WEBHOOK_SECRET not configured — rejecting webhook")
+        return HttpResponse("Webhook secret not configured", status=500)
+
     try:
         event = stripe.Webhook.construct_event(
-            payload, sig_header, env("STRIPE_WEBHOOK_SECRET", default="")
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
         )
+    except ValueError:
+        return HttpResponse("Invalid payload", status=400)
     except stripe.StripeError:
         return HttpResponse("Invalid signature", status=400)
 
@@ -47,41 +62,61 @@ def stripe_billing_webhook(request):
         account_id = session.get("client_reference_id")
         if account_id:
             try:
-                account = Account.objects.get(id=account_id)
-                upgrade_to_mid(account)
-                # Invalidate dashboard cache so new tier is reflected immediately
-                cache.delete(f"dashboard_summary_{account.id}")
-                write_audit_event(
-                    subscriber=None,
-                    actor="client",
-                    action="subscription_upgraded",
-                    outcome="success",
-                    account=account,
-                    metadata={"from_tier": TIER_FREE, "to_tier": "mid"},
-                )
-                logger.info("Account %s upgraded to Mid via checkout", account_id)
+                with transaction.atomic():
+                    account = Account.objects.select_for_update().get(id=account_id)
+                    previous_tier = account.tier
+                    if account.tier == TIER_MID and not account.is_on_trial:
+                        logger.info("Account %s already on paid Mid — skipping upgrade", account_id)
+                    else:
+                        upgrade_to_mid(account)
+                        cache.delete(f"dashboard_summary_{account.id}")
+                        write_audit_event(
+                            subscriber=None,
+                            actor="client",
+                            action="subscription_upgraded",
+                            outcome="success",
+                            account=account,
+                            metadata={"from_tier": previous_tier, "to_tier": "mid"},
+                        )
+                        logger.info("Account %s upgraded to Mid via checkout (was %s)", account_id, previous_tier)
             except Account.DoesNotExist:
                 logger.warning("Checkout completed for unknown account %s", account_id)
+        else:
+            logger.warning("checkout.session.completed missing client_reference_id")
 
     elif event_type == "customer.subscription.deleted":
         subscription = event["data"]["object"]
+        # Try metadata first (set on checkout session, may propagate), fall back to customer lookup
         account_id = subscription.get("metadata", {}).get("account_id")
+        if not account_id:
+            customer_id = subscription.get("customer")
+            if customer_id:
+                # Look up account by Stripe customer stored in session metadata during checkout
+                logger.warning("subscription.deleted missing metadata.account_id for customer %s", customer_id)
         if account_id:
             try:
-                account = Account.objects.get(id=account_id)
-                account.tier = TIER_FREE
-                account.save(update_fields=["tier"])
-                cache.delete(f"dashboard_summary_{account.id}")
-                write_audit_event(
-                    subscriber=None,
-                    actor="engine",
-                    action="subscription_cancelled",
-                    outcome="success",
-                    account=account,
-                )
-                logger.info("Account %s downgraded to Free (subscription deleted)", account_id)
+                with transaction.atomic():
+                    account = Account.objects.select_for_update().get(id=account_id)
+                    if account.tier == TIER_FREE:
+                        logger.info("Account %s already on Free — skipping downgrade", account_id)
+                    else:
+                        previous_tier = account.tier
+                        account.tier = TIER_FREE
+                        account.save(update_fields=["tier"])
+                        cache.delete(f"dashboard_summary_{account.id}")
+                        write_audit_event(
+                            subscriber=None,
+                            actor="engine",
+                            action="subscription_cancelled",
+                            outcome="success",
+                            account=account,
+                            metadata={"from_tier": previous_tier, "to_tier": TIER_FREE},
+                        )
+                        logger.info("Account %s downgraded to Free (subscription deleted)", account_id)
             except Account.DoesNotExist:
                 logger.warning("Subscription deleted for unknown account %s", account_id)
+        else:
+            logger.warning("subscription.deleted: could not resolve account_id from metadata or customer")
 
     return HttpResponse("OK", status=200)
 
@@ -101,13 +136,27 @@ def create_checkout_session(request):
             status=status.HTTP_404_NOT_FOUND,
         )
 
+    # Prevent duplicate subscriptions for already-paid Mid/Pro accounts
+    if account.tier == TIER_MID and not account.is_on_trial:
+        return Response(
+            {"error": {"code": "ALREADY_SUBSCRIBED", "message": "Account is already on a paid plan.", "field": None}},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not STRIPE_MID_TIER_PRICE_ID:
+        logger.error("STRIPE_MID_TIER_PRICE_ID not configured")
+        return Response(
+            {"error": {"code": "CONFIG_ERROR", "message": "Checkout is not available at this time.", "field": None}},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
     try:
         frontend_base = env("NEXT_PUBLIC_BASE_URL", default="http://localhost:3000")
         session = stripe.checkout.Session.create(
             mode="subscription",
             payment_method_types=["card"],
             line_items=[{
-                "price": env("STRIPE_MID_TIER_PRICE_ID", default=""),
+                "price": STRIPE_MID_TIER_PRICE_ID,
                 "quantity": 1,
             }],
             client_reference_id=str(account.id),

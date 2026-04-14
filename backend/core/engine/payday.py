@@ -62,4 +62,5 @@ def is_within_payday_window(dt: datetime) -> bool:
     Returns:
         True if dt is on the 1st or 15th of the month (UTC).
     """
-    return dt.day in (1, 15)
+    utc_dt = dt.astimezone(timezone.utc)
+    return utc_dt.day in (1, 15)

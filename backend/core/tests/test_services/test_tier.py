@@ -29,17 +29,34 @@ class TestGetPollingFrequency:
 
 @pytest.mark.django_db
 class TestIsEngineActive:
-    def test_mid_tier_active(self, account):
+    def test_mid_tier_active_with_dpa_and_mode(self, account):
         account.tier = TIER_MID
+        account.dpa_accepted_at = timezone.now()
+        account.engine_mode = "autopilot"
         account.save()
         from core.services.tier import is_engine_active
         assert is_engine_active(account) is True
 
-    def test_pro_tier_active(self, account):
+    def test_pro_tier_active_with_dpa_and_mode(self, account):
         account.tier = TIER_PRO
+        account.dpa_accepted_at = timezone.now()
+        account.engine_mode = "supervised"
         account.save()
         from core.services.tier import is_engine_active
         assert is_engine_active(account) is True
+
+    def test_mid_tier_inactive_without_dpa(self, account):
+        account.tier = TIER_MID
+        account.save()
+        from core.services.tier import is_engine_active
+        assert is_engine_active(account) is False
+
+    def test_mid_tier_inactive_without_mode(self, account):
+        account.tier = TIER_MID
+        account.dpa_accepted_at = timezone.now()
+        account.save()
+        from core.services.tier import is_engine_active
+        assert is_engine_active(account) is False
 
     def test_free_tier_inactive(self, account):
         account.tier = TIER_FREE

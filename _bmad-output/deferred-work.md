@@ -46,3 +46,15 @@
 
 - `ScopedRateThrottle` in `DEFAULT_THROTTLE_CLASSES` silently passes endpoints without a `throttle_scope` — `AllowAny` endpoints like `initiate_stripe_connect` and `stripe_connect_callback` have no rate limiting. An attacker could flood the cache with state tokens or exhaust DB connections. [backend/safenet_backend/settings/base.py:103]
 - `stripe.error.StripeError` may not exist in Stripe SDK v15 — `backend/core/views/stripe.py:93` catches `stripe.error.StripeError` but Stripe v15 moved exceptions to `stripe.StripeError`. Falls through to generic exception handler. [backend/core/views/stripe.py:93]
+
+## Deferred from: code review of story-2-5 (2026-04-13)
+
+- `polling.py:120` uses pre-v15 `stripe.error.RateLimitError` — dead exception handler if SDK v15 removed this path. Rate limit errors would crash the polling task instead of retrying with backoff. Story spec says DO NOT fix in this story.
+- Free-tier polling gate relies on Redis cache key `poll:last_run:{account_id}` with 48h TTL — cache eviction (memory pressure, restart) resets the gate, allowing Free accounts to poll at hourly rate instead of intended 15-day interval. Architectural decision: consider persisting last_poll_at in the database.
+- Engine activation flow (DPA + mode selection) not presented after upgrade — AC4 clause 3 of Story 2-5 references this flow, but DPA UI is Story 3-1 (backlog). Wire up `engine_active` check post-upgrade when Story 3-1 is built.
+
+## Deferred from: code review of story-3-1 (2026-04-14)
+
+- Expired trial accounts retain Mid-tier privileges for up to 24h until daily celery beat job runs. `set_engine_mode` and `is_engine_active` don't inline-check trial expiry. Architectural decision: consider calling `check_and_degrade_trial` inline in account-mutating endpoints, or increasing celery beat frequency.
+- Frontend stale cache after webhook-driven downgrade — React Query continues showing `engine_active: true`, old tier, and engine mode until next refetch (window focus or polling interval). Would need WebSocket/SSE push or shorter staleTime to mitigate.
+- `STRIPE_WEBHOOK_SECRET` defaults to empty string at module level — warning logs and runtime guard added in story 2-5 review, but should be a hard startup error in production environments to prevent fail-open risk.

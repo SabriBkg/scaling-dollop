@@ -24,6 +24,9 @@ export interface Account {
   engine_active: boolean;
   stripe_connected: boolean;
   profile_complete: boolean;
+  dpa_accepted: boolean;
+  dpa_accepted_at: string | null;
+  engine_mode: "autopilot" | "supervised" | null;
   created_at: string; // ISO 8601
 }
 

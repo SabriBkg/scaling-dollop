@@ -143,11 +143,20 @@ class TestAccountDetail:
         data = response.json()["data"]
         assert data["trial_days_remaining"] == 14 or data["trial_days_remaining"] == 15
 
-    def test_engine_active_for_mid(self, auth_client, account):
+    def test_engine_active_for_mid_with_dpa_and_mode(self, auth_client, account):
+        from django.utils import timezone
         account.tier = "mid"
+        account.dpa_accepted_at = timezone.now()
+        account.engine_mode = "autopilot"
         account.save()
         response = auth_client.get(self.URL)
         assert response.json()["data"]["engine_active"] is True
+
+    def test_engine_inactive_for_mid_without_dpa(self, auth_client, account):
+        account.tier = "mid"
+        account.save()
+        response = auth_client.get(self.URL)
+        assert response.json()["data"]["engine_active"] is False
 
     def test_engine_inactive_for_free(self, auth_client, account):
         account.tier = "free"

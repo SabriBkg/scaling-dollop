@@ -21,8 +21,12 @@ def get_polling_frequency(account) -> int:
 
 
 def is_engine_active(account) -> bool:
-    """True only for Mid/Pro tiers — Free tier has engine deactivated."""
-    return account.tier in (TIER_MID, TIER_PRO)
+    """True only when Mid/Pro tier, DPA accepted, and engine mode selected."""
+    return (
+        account.tier in (TIER_MID, TIER_PRO)
+        and account.dpa_accepted
+        and account.engine_mode is not None
+    )
 
 
 def check_and_degrade_trial(account) -> bool:

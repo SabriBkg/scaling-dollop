@@ -18,3 +18,4 @@ class DashboardSummarySerializer(serializers.Serializer):
     recovery_rate = serializers.FloatField()
     net_benefit_cents = serializers.IntegerField()
     decline_breakdown = DeclineBreakdownEntrySerializer(many=True)
+    pending_action_count = serializers.IntegerField()

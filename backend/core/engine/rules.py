@@ -256,10 +256,12 @@ DECLINE_RULES: dict[str, DeclineRule] = {
 }
 
 
-def get_rule(decline_code: str) -> DeclineRule:
+def get_rule(decline_code: str | None) -> DeclineRule:
     """
     Look up the rule for a decline code.
-    Falls through to _default for any unknown code.
+    Falls through to _default for any unknown code or None.
     Never raises KeyError.
     """
+    if not decline_code:
+        return dict(DECLINE_RULES["_default"])
     return dict(DECLINE_RULES.get(decline_code.lower().strip(), DECLINE_RULES["_default"]))

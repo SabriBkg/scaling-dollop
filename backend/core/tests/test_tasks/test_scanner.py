@@ -44,6 +44,7 @@ def _make_payment_intent(
     charge = MagicMock()
     charge.billing_details.email = email
     charge.payment_method_details.card.country = country
+    charge.payment_method_details.card.fingerprint = "fp_test_scanner"
     pi.charges.data = [charge]
 
     return pi

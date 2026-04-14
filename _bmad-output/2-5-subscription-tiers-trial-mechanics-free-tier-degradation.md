@@ -1,6 +1,6 @@
 # Story 2.5: Subscription Tiers, Trial Mechanics & Free-Tier Degradation
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -200,6 +200,23 @@ Claude Opus 4.6
 - All 192 backend tests pass, 41 frontend tests pass (4 pre-existing failures in ProfileComplete unrelated to this story)
 - Dashboard cache (`dashboard_summary_{account_id}`) invalidated on tier changes for immediate UI reflection
 - Used correct `stripe.StripeError` (not `stripe.error.StripeError`) in new code per SDK v15
+
+### Review Findings
+
+- [x] [Review][Patch] Add `useEffect` to detect `?upgrade=success` query param on dashboard — trigger `useAccount` refetch and show success toast (AC4, Decision: 1A) — FIXED
+- [x] [Review][Defer] Engine activation flow (DPA + mode selection) not presented after upgrade — AC4 clause 3 references Story 3-1 DPA flow which doesn't exist yet; defer until Epic 3 — deferred, forward-looking AC
+- [x] [Review][Patch] `STRIPE_WEBHOOK_SECRET` defaults to empty string — fail-open risk [billing.py:38] — FIXED
+- [x] [Review][Patch] `STRIPE_MID_TIER_PRICE_ID` defaults to empty string — silent misconfiguration [billing.py:110] — FIXED
+- [x] [Review][Patch] Webhook missing `ValueError` catch for malformed JSON payloads — causes 500 + Stripe retry storm [billing.py:40] — FIXED
+- [x] [Review][Patch] `subscription.deleted` handler — added warning log when metadata.account_id missing, added `select_for_update` [billing.py:68] — FIXED
+- [x] [Review][Patch] No idempotency check on webhook upgrade — now checks current tier, captures actual `from_tier` [billing.py:49-61] — FIXED
+- [x] [Review][Patch] Race between `expire_trials` and concurrent webhook upgrade — added `select_for_update` per-account [trial_expiration.py:27] — FIXED
+- [x] [Review][Patch] `next_scan_at` is `null` when cache key missing — now falls back to `now() + frequency` [account.py:36-40] — FIXED
+- [x] [Review][Patch] Trial expiration task does not invalidate `dashboard_summary_{account_id}` cache — added cache.delete [trial_expiration.py:29] — FIXED
+- [x] [Review][Patch] `create_checkout_session` allows already-Mid/Pro accounts to create duplicate Stripe subscriptions [billing.py:91] — FIXED
+- [x] [Review][Patch] `complete_profile` response missing `trial_days_remaining`, `next_scan_at`, `engine_active` — added fields [account.py:132-149] — FIXED
+- [x] [Review][Defer] `polling.py:120` uses pre-v15 `stripe.error.RateLimitError` — pre-existing, spec says DO NOT fix in this story — deferred, pre-existing
+- [x] [Review][Defer] Free-tier polling gate relies on cache with 48h TTL — eviction resets gate, allowing polls far more frequently than 15-day target — deferred, pre-existing architecture decision
 
 ### Change Log
 
