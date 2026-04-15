@@ -127,6 +127,10 @@ def poll_account_failures(self, account_id):
         logger.warning("Rate limited during polling for account %s, retrying", account_id)
         raise self.retry(exc=exc, countdown=2 ** self.request.retries * 30)
 
+    # Process any unqueued failures from the last 24h (catches pre-activation gaps)
+    if is_engine_active(account):
+        _process_unqueued_failures(account)
+
     # Detect card updates and trigger immediate retries (FR47)
     if is_engine_active(account):
         _detect_card_updates(account, access_token)
@@ -231,6 +235,82 @@ def _process_autopilot_recovery(failure, account):
         )
 
     execute_recovery_action(failure, decision, account)
+
+
+def _process_unqueued_failures(account):
+    """
+    Find failures from the last 24h that were ingested before the engine was
+    active (or before a mode switch) and route them into the current engine mode.
+    Prevents the gap where pre-activation failures silently vanish.
+    """
+    from datetime import timedelta
+
+    from core.engine.processor import get_recovery_action
+    from core.engine.state_machine import ACTION_FRAUD_FLAG, ACTION_NO_ACTION, STATUS_ACTIVE
+    from core.models.pending_action import PendingAction, STATUS_PENDING
+    from core.models.subscriber import SubscriberFailure
+    from core.services.recovery import execute_recovery_action
+
+    cutoff = timezone.now() - timedelta(hours=24)
+
+    # Failures with no pending action and no scheduled retry = never processed
+    failures = (
+        SubscriberFailure.objects
+        .for_account(account.id)
+        .filter(
+            failure_created_at__gte=cutoff,
+            subscriber__status=STATUS_ACTIVE,
+            subscriber__excluded_from_automation=False,
+            next_retry_at__isnull=True,
+            retry_count=0,
+        )
+        .exclude(pending_actions__status=STATUS_PENDING)
+        .select_related("subscriber")
+    )
+
+    processed = 0
+    for failure in failures:
+        decision = get_recovery_action(
+            failure.decline_code,
+            payment_method_country=failure.payment_method_country,
+        )
+
+        if decision.action == ACTION_NO_ACTION:
+            continue
+
+        if decision.action == ACTION_FRAUD_FLAG:
+            execute_recovery_action(failure, decision, account)
+            processed += 1
+            continue
+
+        if account.engine_mode == "autopilot":
+            execute_recovery_action(failure, decision, account)
+        elif account.engine_mode == "supervised":
+            PendingAction.objects.create(
+                account=account,
+                subscriber=failure.subscriber,
+                failure=failure,
+                recommended_action=decision.action,
+                recommended_retry_cap=decision.retry_cap,
+                recommended_payday_aware=decision.payday_aware,
+            )
+            write_audit_event(
+                subscriber=str(failure.subscriber.id),
+                actor="engine",
+                action="action_queued_supervised",
+                outcome="success",
+                metadata={
+                    "failure_id": str(failure.id),
+                    "recommended_action": decision.action,
+                    "decline_code": failure.decline_code,
+                    "trigger": "unqueued_failure_catchup",
+                },
+                account=account,
+            )
+        processed += 1
+
+    if processed:
+        logger.info("Processed %d unqueued failures for account %s", processed, account.id)
 
 
 # Stripe subscription statuses that indicate recovery should stop

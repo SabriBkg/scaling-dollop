@@ -45,6 +45,9 @@ export default function ModeSelectionPage() {
       });
       queryClient.setQueryData(["account", "me"], data.data);
       queryClient.invalidateQueries({ queryKey: ["account", "me"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["actions", "pending"] });
+      queryClient.invalidateQueries({ queryKey: ["subscribers"] });
       router.push("/dashboard");
     } catch {
       toast.error("Failed to activate the recovery engine. Please try again.");

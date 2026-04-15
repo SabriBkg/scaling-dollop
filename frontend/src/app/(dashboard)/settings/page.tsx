@@ -21,6 +21,9 @@ export default function SettingsPage() {
       const { data } = await api.post<ApiResponse<Account>>("/account/engine/mode/", { mode });
       queryClient.setQueryData(["account", "me"], data.data);
       queryClient.invalidateQueries({ queryKey: ["account", "me"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["actions", "pending"] });
+      queryClient.invalidateQueries({ queryKey: ["subscribers"] });
       toast.success(`Recovery mode updated to ${mode}`);
     } catch {
       toast.error("Failed to update recovery mode. Please try again.");

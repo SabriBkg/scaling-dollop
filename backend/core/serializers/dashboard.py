@@ -9,6 +9,13 @@ class DeclineBreakdownEntrySerializer(serializers.Serializer):
     recovery_action = serializers.CharField()
 
 
+class AttentionItemSerializer(serializers.Serializer):
+    type = serializers.CharField()
+    subscriber_id = serializers.IntegerField()
+    subscriber_name = serializers.CharField()
+    label = serializers.CharField()
+
+
 class DashboardSummarySerializer(serializers.Serializer):
     total_failures = serializers.IntegerField()
     total_subscribers = serializers.IntegerField()
@@ -19,3 +26,4 @@ class DashboardSummarySerializer(serializers.Serializer):
     net_benefit_cents = serializers.IntegerField()
     decline_breakdown = DeclineBreakdownEntrySerializer(many=True)
     pending_action_count = serializers.IntegerField()
+    attention_items = AttentionItemSerializer(many=True)

@@ -5,8 +5,9 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from core.engine.labels import DECLINE_CODE_LABELS
-from core.engine.state_machine import STATUS_ACTIVE, STATUS_RECOVERED
+from core.engine.state_machine import STATUS_ACTIVE, STATUS_RECOVERED, STATUS_FRAUD_FLAGGED
 from core.models.account import Account
+from core.models.pending_action import PendingAction, STATUS_PENDING
 from core.models.subscriber import Subscriber, SubscriberFailure
 
 
@@ -194,6 +195,72 @@ class TestDashboardSummaryEndpoint:
         assert isinstance(data["estimated_recoverable_cents"], int)
         assert isinstance(data["recovered_this_month_cents"], int)
         assert isinstance(data["net_benefit_cents"], int)
+
+
+    def test_attention_items_empty_by_default(self, auth_client, account):
+        cache.clear()
+        response = auth_client.get(self.URL)
+        data = response.json()["data"]
+        assert "attention_items" in data
+        assert data["attention_items"] == []
+
+    def test_attention_items_fraud_flag(self, auth_client, account):
+        cache.clear()
+        sub, _ = _create_failure(account, "fraudulent", 2000)
+        sub.status = STATUS_FRAUD_FLAGGED
+        sub.save(update_fields=["status"])
+
+        response = auth_client.get(self.URL)
+        items = response.json()["data"]["attention_items"]
+        assert len(items) >= 1
+        fraud_items = [i for i in items if i["type"] == "fraud_flag"]
+        assert len(fraud_items) == 1
+        assert fraud_items[0]["subscriber_id"] == sub.id
+
+    def test_attention_items_pending_action(self, auth_client, account):
+        cache.clear()
+        sub, failure = _create_failure(account, "insufficient_funds", 5000)
+        PendingAction.objects.create(
+            subscriber=sub,
+            failure=failure,
+            recommended_action="retry_notify",
+            recommended_retry_cap=3,
+            recommended_payday_aware=True,
+            status=STATUS_PENDING,
+            account=account,
+        )
+
+        response = auth_client.get(self.URL)
+        items = response.json()["data"]["attention_items"]
+        pending_items = [i for i in items if i["type"] == "pending_action"]
+        assert len(pending_items) == 1
+        assert pending_items[0]["subscriber_id"] == sub.id
+
+    def test_attention_items_retry_cap(self, auth_client, account):
+        cache.clear()
+        sub, failure = _create_failure(account, "insufficient_funds", 5000)
+        # insufficient_funds has retry_cap=3, set retry_count=2 (>= 3-1)
+        failure.retry_count = 2
+        failure.save(update_fields=["retry_count"])
+
+        response = auth_client.get(self.URL)
+        items = response.json()["data"]["attention_items"]
+        retry_items = [i for i in items if i["type"] == "retry_cap"]
+        assert len(retry_items) == 1
+        assert retry_items[0]["subscriber_id"] == sub.id
+
+    def test_attention_item_structure(self, auth_client, account):
+        cache.clear()
+        sub, _ = _create_failure(account, "fraudulent", 2000)
+        sub.status = STATUS_FRAUD_FLAGGED
+        sub.save(update_fields=["status"])
+
+        response = auth_client.get(self.URL)
+        item = response.json()["data"]["attention_items"][0]
+        assert "type" in item
+        assert "subscriber_id" in item
+        assert "subscriber_name" in item
+        assert "label" in item
 
 
 @pytest.mark.django_db

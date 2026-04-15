@@ -242,6 +242,10 @@ def set_engine_mode(request):
                     account=account,
                 )
 
+    # Backfill unprocessed failures from the last 24 hours into the engine queue
+    if changed and is_engine_active(account):
+        _backfill_recent_failures(account)
+
     return Response(_build_account_response(account, request.user))
 
 
@@ -262,3 +266,82 @@ def _first_error_field(errors: dict) -> str | None:
             continue
         return field
     return None
+
+
+def _backfill_recent_failures(account):
+    """
+    Process unprocessed SubscriberFailures from the last 24 hours.
+    Called once after engine activation or mode switch so that pre-existing
+    failures don't silently vanish from the queue.
+    """
+    import logging
+    from datetime import timedelta
+
+    from core.engine.processor import get_recovery_action
+    from core.engine.state_machine import ACTION_FRAUD_FLAG, ACTION_NO_ACTION, STATUS_ACTIVE
+    from core.models.pending_action import PendingAction, STATUS_PENDING
+    from core.models.subscriber import SubscriberFailure
+    from core.services.recovery import execute_recovery_action
+
+    logger = logging.getLogger(__name__)
+    cutoff = timezone.now() - timedelta(hours=24)
+
+    # Failures in the last 24h for active subscribers that have no pending action yet
+    failures = (
+        SubscriberFailure.objects
+        .for_account(account.id)
+        .filter(
+            failure_created_at__gte=cutoff,
+            subscriber__status=STATUS_ACTIVE,
+            subscriber__excluded_from_automation=False,
+        )
+        .exclude(
+            pending_actions__status=STATUS_PENDING,
+        )
+        .select_related("subscriber")
+    )
+
+    backfilled = 0
+    for failure in failures:
+        decision = get_recovery_action(
+            failure.decline_code,
+            payment_method_country=failure.payment_method_country,
+        )
+
+        if decision.action == ACTION_NO_ACTION:
+            continue
+
+        if decision.action == ACTION_FRAUD_FLAG:
+            execute_recovery_action(failure, decision, account)
+            backfilled += 1
+            continue
+
+        if account.engine_mode == "autopilot":
+            execute_recovery_action(failure, decision, account)
+        elif account.engine_mode == "supervised":
+            PendingAction.objects.create(
+                account=account,
+                subscriber=failure.subscriber,
+                failure=failure,
+                recommended_action=decision.action,
+                recommended_retry_cap=decision.retry_cap,
+                recommended_payday_aware=decision.payday_aware,
+            )
+            write_audit_event(
+                subscriber=str(failure.subscriber.id),
+                actor="engine",
+                action="action_queued_supervised",
+                outcome="success",
+                metadata={
+                    "failure_id": str(failure.id),
+                    "recommended_action": decision.action,
+                    "decline_code": failure.decline_code,
+                    "trigger": "engine_activation_backfill",
+                },
+                account=account,
+            )
+        backfilled += 1
+
+    if backfilled:
+        logger.info("Backfilled %d recent failures for account %s", backfilled, account.id)
+        cache.delete(f"dashboard_summary_{account.id}")

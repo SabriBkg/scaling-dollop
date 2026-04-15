@@ -6,6 +6,13 @@ export interface DeclineBreakdownEntry {
   recovery_action: "retry_notify" | "notify_only" | "fraud_flag" | "no_action";
 }
 
+export interface AttentionItem {
+  type: "fraud_flag" | "pending_action" | "retry_cap";
+  subscriber_id: number;
+  subscriber_name: string;
+  label: string;
+}
+
 export interface DashboardSummary {
   total_failures: number;
   total_subscribers: number;
@@ -16,4 +23,5 @@ export interface DashboardSummary {
   net_benefit_cents: number;
   decline_breakdown: DeclineBreakdownEntry[];
   pending_action_count: number;
+  attention_items: AttentionItem[];
 }
