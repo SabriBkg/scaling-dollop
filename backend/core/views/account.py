@@ -287,6 +287,7 @@ def _backfill_recent_failures(account):
     cutoff = timezone.now() - timedelta(hours=24)
 
     # Failures in the last 24h for active subscribers that have no pending action yet
+    # and are not already in flight (next_retry_at set or retry_count > 0).
     failures = (
         SubscriberFailure.objects
         .for_account(account.id)
@@ -294,6 +295,8 @@ def _backfill_recent_failures(account):
             failure_created_at__gte=cutoff,
             subscriber__status=STATUS_ACTIVE,
             subscriber__excluded_from_automation=False,
+            next_retry_at__isnull=True,
+            retry_count=0,
         )
         .exclude(
             pending_actions__status=STATUS_PENDING,
@@ -303,44 +306,50 @@ def _backfill_recent_failures(account):
 
     backfilled = 0
     for failure in failures:
-        decision = get_recovery_action(
-            failure.decline_code,
-            payment_method_country=failure.payment_method_country,
-        )
+        try:
+            decision = get_recovery_action(
+                failure.decline_code,
+                payment_method_country=failure.payment_method_country,
+            )
 
-        if decision.action == ACTION_NO_ACTION:
-            continue
+            if decision.action == ACTION_NO_ACTION:
+                continue
 
-        if decision.action == ACTION_FRAUD_FLAG:
-            execute_recovery_action(failure, decision, account)
+            if decision.action == ACTION_FRAUD_FLAG:
+                execute_recovery_action(failure, decision, account)
+                backfilled += 1
+                continue
+
+            if account.engine_mode == "autopilot":
+                execute_recovery_action(failure, decision, account)
+            elif account.engine_mode == "supervised":
+                PendingAction.objects.create(
+                    account=account,
+                    subscriber=failure.subscriber,
+                    failure=failure,
+                    recommended_action=decision.action,
+                    recommended_retry_cap=decision.retry_cap,
+                    recommended_payday_aware=decision.payday_aware,
+                )
+                write_audit_event(
+                    subscriber=str(failure.subscriber.id),
+                    actor="engine",
+                    action="action_queued_supervised",
+                    outcome="success",
+                    metadata={
+                        "failure_id": str(failure.id),
+                        "recommended_action": decision.action,
+                        "decline_code": failure.decline_code,
+                        "trigger": "engine_activation_backfill",
+                    },
+                    account=account,
+                )
             backfilled += 1
+        except Exception:
+            logger.exception(
+                "Backfill failed for failure %s on account %s", failure.id, account.id
+            )
             continue
-
-        if account.engine_mode == "autopilot":
-            execute_recovery_action(failure, decision, account)
-        elif account.engine_mode == "supervised":
-            PendingAction.objects.create(
-                account=account,
-                subscriber=failure.subscriber,
-                failure=failure,
-                recommended_action=decision.action,
-                recommended_retry_cap=decision.retry_cap,
-                recommended_payday_aware=decision.payday_aware,
-            )
-            write_audit_event(
-                subscriber=str(failure.subscriber.id),
-                actor="engine",
-                action="action_queued_supervised",
-                outcome="success",
-                metadata={
-                    "failure_id": str(failure.id),
-                    "recommended_action": decision.action,
-                    "decline_code": failure.decline_code,
-                    "trigger": "engine_activation_backfill",
-                },
-                account=account,
-            )
-        backfilled += 1
 
     if backfilled:
         logger.info("Backfilled %d recent failures for account %s", backfilled, account.id)

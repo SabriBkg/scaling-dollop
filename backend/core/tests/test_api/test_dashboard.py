@@ -262,6 +262,33 @@ class TestDashboardSummaryEndpoint:
         assert "subscriber_name" in item
         assert "label" in item
 
+    def test_attention_items_isolated_by_tenant(
+        self, auth_client, account, second_account
+    ):
+        """A fraud-flagged subscriber on another tenant must not leak in."""
+        cache.clear()
+
+        other_sub, _ = _create_failure(
+            second_account, "fraudulent", 9999, pi_suffix="_other"
+        )
+        other_sub.status = STATUS_FRAUD_FLAGGED
+        other_sub.save(update_fields=["status"])
+
+        PendingAction.objects.create(
+            account=second_account,
+            subscriber=other_sub,
+            failure=other_sub.failures.first(),
+            recommended_action="retry_notify",
+            status=STATUS_PENDING,
+        )
+
+        response = auth_client.get(self.URL)
+        items = response.json()["data"]["attention_items"]
+        assert items == []
+
+        leaked_ids = {i["subscriber_id"] for i in items}
+        assert other_sub.id not in leaked_ids
+
 
 @pytest.mark.django_db
 class TestDeclineCodeLabels:
