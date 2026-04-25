@@ -17,6 +17,13 @@ from core.services.recovery import process_retry_result
 
 logger = logging.getLogger(__name__)
 
+# Stripe error types that are transient and should use Celery retry
+# rather than burning a business retry count
+TRANSIENT_STRIPE_ERRORS = (
+    stripe.RateLimitError,
+    stripe.APIConnectionError,
+)
+
 
 @app.task(bind=True, max_retries=3, default_retry_delay=60)
 def execute_retry(self, failure_id):
@@ -30,6 +37,7 @@ def execute_retry(self, failure_id):
         failure = (
             SubscriberFailure.objects
             .select_related("subscriber", "account")
+            .select_for_update()
             .get(id=failure_id)
         )
     except SubscriberFailure.DoesNotExist:
@@ -56,16 +64,26 @@ def execute_retry(self, failure_id):
             api_key=connection.access_token,
         )
         success = result.status == "succeeded"
-        process_retry_result(failure, success=success)
+        with transaction.atomic():
+            process_retry_result(failure, success=success)
         logger.info("COMPLETE execute_retry failure_id=%s success=%s", failure_id, success)
         return {"failure_id": failure_id, "success": success}
 
+    except TRANSIENT_STRIPE_ERRORS as exc:
+        # Transient Stripe errors — use Celery retry, don't burn business retry count
+        logger.warning(
+            "Transient Stripe error during retry for failure %s: %s, Celery retry %d/%d",
+            failure_id, str(exc), self.request.retries, self.max_retries,
+        )
+        raise self.retry(exc=exc)
+
     except stripe.StripeError as exc:
-        # Stripe API error — treat as failed retry
+        # Permanent Stripe error — treat as failed retry
         logger.warning(
             "Stripe error during retry for failure %s: %s", failure_id, str(exc)
         )
-        process_retry_result(failure, success=False)
+        with transaction.atomic():
+            process_retry_result(failure, success=False)
         return {"failure_id": failure_id, "success": False, "error": str(exc)}
 
     except Exception as exc:
@@ -87,20 +105,27 @@ def execute_pending_retries(self):
     """
     logger.info("START execute_pending_retries")
 
-    now = timezone.now()
-    pending = (
-        SubscriberFailure.objects
-        .select_related("subscriber")
-        .filter(
-            next_retry_at__lte=now,
-            subscriber__status=STATUS_ACTIVE,
+    try:
+        now = timezone.now()
+        pending = (
+            SubscriberFailure.objects
+            .select_related("subscriber")
+            .filter(
+                next_retry_at__lte=now,
+                subscriber__status=STATUS_ACTIVE,
+            )
         )
-    )
 
-    dispatched = 0
-    for failure in pending:
-        execute_retry.delay(failure.id)
-        dispatched += 1
+        dispatched = 0
+        for failure in pending:
+            execute_retry.delay(failure.id)
+            dispatched += 1
 
-    logger.info("COMPLETE execute_pending_retries dispatched=%d", dispatched)
-    return {"dispatched": dispatched}
+        logger.info("COMPLETE execute_pending_retries dispatched=%d", dispatched)
+        return {"dispatched": dispatched}
+
+    except Exception as exc:
+        logger.error("FAILED execute_pending_retries error=%s", str(exc))
+        # Cannot write DeadLetterLog without an account (TenantScopedModel),
+        # but the error is logged above for operator review
+        raise

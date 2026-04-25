@@ -60,8 +60,10 @@ services:
     # Multiple beat instances double-fire retries. Enforce via Railway "replicas: 1" config.
 
   frontend:
-    build: ./frontend
-    command: sh -c "npm install --include=dev && npm run dev"
+    build:
+      context: ./frontend
+      target: development
+    command: npm run dev
     environment:
       - NODE_ENV=development
     volumes:

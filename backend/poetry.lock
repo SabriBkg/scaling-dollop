@@ -1145,6 +1145,24 @@ socks = ["PySocks (>=1.5.6,!=1.5.7)"]
 use-chardet-on-py3 = ["chardet (>=3.0.2,<8)"]
 
 [[package]]
+name = "resend"
+version = "2.28.1"
+description = "Resend Python SDK"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "resend-2.28.1-py2.py3-none-any.whl", hash = "sha256:353b87469d96b04b31947974083a3dbcd8fb0418392b8cdb835dac89ea4d2532"},
+    {file = "resend-2.28.1.tar.gz", hash = "sha256:c3809ea696fc727b3bd4f4bdd121385d9b3eea453bbb8325e28bdabbd73df356"},
+]
+
+[package.dependencies]
+requests = ">=2.31.0"
+typing-extensions = ">=4.4.0"
+
+[package.extras]
+async = ["httpx (>=0.24.0)"]
+
+[[package]]
 name = "rpds-py"
 version = "0.30.0"
 description = "Python bindings to Rust's persistent data structures (rpds)"
@@ -1467,4 +1485,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "47951dc7a673b4ffe2ac7ab889b2bd6aa3d2d58185843f28738659b14379a193"
+content-hash = "8870bb1be23067d478dd75c66bd999f25cf3f1e6c4a3f7f4f57a42fe16283c7a"

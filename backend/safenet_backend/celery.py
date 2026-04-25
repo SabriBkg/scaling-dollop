@@ -11,9 +11,9 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks(["core"])
 
 app.conf.beat_schedule = {
-    "hourly-retry-poll": {
+    "daily-failure-poll": {
         "task": "core.tasks.polling.poll_new_failures",
-        "schedule": 3600.0,
+        "schedule": 86400.0,
     },
     "daily-trial-expiration": {
         "task": "core.tasks.trial_expiration.expire_trials",

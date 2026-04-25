@@ -58,3 +58,25 @@
 - Expired trial accounts retain Mid-tier privileges for up to 24h until daily celery beat job runs. `set_engine_mode` and `is_engine_active` don't inline-check trial expiry. Architectural decision: consider calling `check_and_degrade_trial` inline in account-mutating endpoints, or increasing celery beat frequency.
 - Frontend stale cache after webhook-driven downgrade — React Query continues showing `engine_active: true`, old tier, and engine mode until next refetch (window focus or polling interval). Would need WebSocket/SSE push or shorter staleTime to mitigate.
 - `STRIPE_WEBHOOK_SECRET` defaults to empty string at module level — warning logs and runtime guard added in story 2-5 review, but should be a hard startup error in production environments to prevent fail-open risk.
+
+## Deferred from: code review of story-3-2 (2026-04-15)
+
+- N+1 Stripe API calls in `_check_subscription_cancellations` and `_detect_card_updates` — iterates all active subscribers making individual API calls per subscriber with no batching or rate limiting. Will hit Stripe rate limits at scale.
+- Cache loss causes `_process_unqueued_failures` to potentially re-dispatch recovery actions for already-processed failures. Idempotent ingestion guards new failures, but recovery actions could duplicate.
+- `SubscriberFailure.amount_cents` is `IntegerField` (max ~2.1B) — potential overflow for high-value JPY/KRW transactions. Consider `BigIntegerField`.
+- Stripe `PaymentIntent.confirm` on `requires_payment_method` status will always fail without first attaching the subscriber's updated payment method. Retries burn business retry counts without actually re-charging. Needs a dedicated story to fetch default PM from Customer and attach to PI before confirming.
+
+## Deferred from: code review of story-3-3 (2026-04-24)
+
+- N+1 Stripe API calls in `_detect_card_updates` — 1 `Customer.retrieve` per active subscriber with pending failures. Spec Task 5.3 requires batching but it was not implemented. Will hit Stripe rate limits at scale.
+- N+1 Stripe API calls in `_check_subscription_cancellations` — Same N+1 pattern with `Subscription.list` per subscriber. Combined with card detection, 2+ API calls per subscriber per poll cycle.
+- Race condition: fingerprint read-modify-write in `_detect_card_updates` without `select_for_update` or atomic block. Concurrent polls for the same account could cause lost fingerprint updates. Low risk since daily polls are serialized by Celery.
+- `cancel_at_period_end` in `_check_subscription_cancellations` transitions subscriber to `passive_churn` while subscription is still active until period ends, prematurely stopping recovery efforts.
+
+## Deferred from: code review of story-3-4 (2026-04-24)
+
+- `_check_subscription_cancellations` calls `subscriber.mark_passive_churn()` directly instead of `_safe_transition()` — TransitionNotAllowed would crash the entire polling task for that account. Pre-existing; fix when touching subscription cancellation logic.
+- Business logic (decision re-derivation + execution loop) lives inline in `batch_approve_actions` view instead of a service function. Violates "no business logic in views" constraint. Functional as-is; refactor when adding batch action features.
+- `_safe_transition` has TOCTOU race: `method()` then `save()` without `select_for_update()`. Concurrent workers can overwrite subscriber state. Needs systemic DB-level locking pattern across all FSM transitions.
+- `formatCents` in PendingActionRow.tsx hardcodes USD currency. Multi-currency support is out of scope for this story.
+- `process_retry_result` checks in-memory `subscriber.status` which can be stale from concurrent transitions. `_safe_transition` catches TransitionNotAllowed, but a `refresh_from_db` pattern would be more robust.

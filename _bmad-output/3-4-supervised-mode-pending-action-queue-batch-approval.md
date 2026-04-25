@@ -1,6 +1,6 @@
 # Story 3.4: Supervised Mode — Pending Action Queue & Batch Approval
 
-Status: review
+Status: done
 
 ## Story
 
@@ -350,6 +350,41 @@ Modified files:
 - [Source: _bmad-output/ux-design-specification.md — Supervised Review Queue, BatchActionToolbar, Toast Patterns, Zero-State, UX-DR8/DR16/DR18]
 - [Source: _bmad-output/3-2-autopilot-recovery-engine-rule-execution-4-state-status-machine.md — Recovery service, FSM, polling integration]
 - [Source: _bmad-output/3-3-card-update-detection-immediate-retry.md — Card update detection pattern]
+
+### Review Findings
+
+#### Decision Needed (all resolved — dismissed)
+- [x] [Review][Dismissed] **D1: EngineStatusIndicator missing badge count** — NavBar badge satisfies AC1 intent
+- [x] [Review][Dismissed] **D2: _detect_card_updates query semantics change** — Intentional: only failures already in retry pipeline trigger card-update detection
+- [x] [Review][Dismissed] **D3: ExclusionDialog shows no subscriber identity** — Acceptable for MVP
+
+#### Patch (fix is unambiguous)
+- [x] [Review][Dismissed] **P1: schedule_retry references undefined `account` variable** — FALSE POSITIVE: `account = failure.account` already defined at line 149
+- [x] [Review][Dismissed] **P2: process_retry_result references undefined `account` variable** — FALSE POSITIVE: `account = failure.account` already defined at line 210
+- [x] [Review][Patch] **P3: _safe_transition return value ignored for fraud flag audit** — FIXED: audit outcome now conditional on transition result [backend/core/services/recovery.py]
+- [x] [Review][Patch] **P4: batch_approve_actions has no transaction atomicity** — FIXED: wrapped each action in `transaction.atomic()` [backend/core/views/actions.py]
+- [x] [Review][Patch] **P5: handleExclude fires parallel mutations without coordination** — FIXED: refactored to sequential `mutateAsync` with consolidated toast and error handling [frontend/src/app/(dashboard)/review-queue/page.tsx]
+- [x] [Review][Patch] **P6: No duplicate guard on PendingAction creation** — FIXED: changed to `get_or_create` with `(failure, status=pending)` guard [backend/core/tasks/polling.py]
+- [x] [Review][Patch] **P7: Exception message leaks in batch approve response** — FIXED: generic error message instead of `str(exc)` [backend/core/views/actions.py]
+- [x] [Review][Patch] **P8: No per-action audit for batch approval failures** — FIXED: individual `batch_action_failed` audit event in except block [backend/core/views/actions.py]
+- [x] [Review][Patch] **P9: Narrowed Stripe exception misses APIError (5xx)** — FIXED: added `stripe.APIError` to exception tuple [backend/core/tasks/polling.py]
+- [x] [Review][Patch] **P10: Batch audit event always records outcome="success"** — FIXED: conditional outcome (success/partial/failed) [backend/core/views/actions.py]
+- [x] [Review][Patch] **P11: Batch approve race with concurrent exclusion** — FIXED: re-checks `excluded_from_automation` inside transaction loop [backend/core/views/actions.py]
+- [x] [Review][Patch] **P12: No size limit on action_ids in batch approve** — FIXED: MAX_BATCH_SIZE=100 with 400 error [backend/core/views/actions.py]
+- [x] [Review][Patch] **P13: useEffect auto-selects all rows on every 60s refetch** — FIXED: `useRef` guard for initial selection only [frontend/src/app/(dashboard)/review-queue/page.tsx]
+- [x] [Review][Patch] **P14: ExclusionDialog isPending not connected to mutation state** — FIXED: dedicated `isExcluding` state tracks full async flow [frontend/src/app/(dashboard)/review-queue/page.tsx]
+- [x] [Review][Patch] **P15: pending_action_list evaluates queryset twice** — FIXED: `len(serializer.data)` instead of `.count()` [backend/core/views/actions.py]
+- [x] [Review][Patch] **P16: Toolbar label says "subscribers" but counts actions** — FIXED: changed to "actions" [frontend/src/components/review/BatchActionToolbar.tsx]
+- [x] [Review][Patch] **P17: PendingAction updated_at not refreshed on status changes** — FIXED: added `updated_at` to `update_fields` and bulk `.update()` [backend/core/views/actions.py]
+- [x] [Review][Patch] **P18: Double audit event in supervised _queue_immediate_retry** — FIXED: removed duplicate; `_process_supervised_queue` handles it [backend/core/tasks/polling.py]
+- [x] [Review][Patch] **P19: action_ids not validated for type/shape** — FIXED: type check before processing [backend/core/views/actions.py]
+
+#### Deferred (pre-existing / out of scope)
+- [x] [Review][Defer] **W1: _check_subscription_cancellations not using _safe_transition** — Pre-existing code calls `subscriber.mark_passive_churn()` directly; TransitionNotAllowed would crash polling task. [backend/core/tasks/polling.py] — deferred, pre-existing
+- [x] [Review][Defer] **W2: Business logic (decision loop) lives in batch approve view** — Architecture says "no business logic in views" but orchestration is inline. Functional, refactor later. [backend/core/views/actions.py] — deferred, architectural
+- [x] [Review][Defer] **W3: _safe_transition TOCTOU race needs select_for_update** — `method()` then `save()` without row locking; concurrent save can overwrite state. Needs broader DB-level fix. [backend/core/services/recovery.py] — deferred, systemic
+- [x] [Review][Defer] **W4: formatCents hardcodes USD currency** — Multi-currency not in scope for this story. [frontend/src/components/review/PendingActionRow.tsx] — deferred, future feature
+- [x] [Review][Defer] **W5: process_retry_result stale in-memory status check** — `_safe_transition` handles the TransitionNotAllowed case; deeper fix needs refresh_from_db pattern. [backend/core/services/recovery.py] — deferred, systemic
 
 ## Dev Agent Record
 
