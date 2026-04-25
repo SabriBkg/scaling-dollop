@@ -75,6 +75,67 @@ So that my subscriber receives a professional, human-feeling email that feels li
   - [x] 6.2 `core/tests/test_tasks/test_notifications.py` — test gate checks (tier, DPA, opt-out, excluded, no-email), success path with mock Resend, retry on API error, dead-letter on exhausted retries, audit event creation
   - [x] 6.3 `core/tests/test_models/test_notification.py` — model creation, tenant scoping
 
+### Review Findings
+
+_Code review run: 2026-04-25 — Blind Hunter + Edge Case Hunter + Acceptance Auditor (parallel)_
+
+**Decision-needed (resolved 2026-04-25):**
+
+- [x] [Review][Decision][Resolved] Stripe customer portal URL is not a valid login URL — `email.py:106` uses `https://billing.stripe.com/p/login/{stripe_user_id}`, which is the connected-account ID (`acct_…`), not a portal key. **Resolution:** The CTA must link to the SaaS owner's own application, where the customer updates their card via the SaaS owner's existing flow. SafeNet is not in the payment-update path. Requires (1) a new `Account.customer_update_url` field captured during Stripe Connect onboarding (follow-up story), (2) email service reads from this field, (3) Story 4.1 spec updated to remove the wrong Stripe portal instruction. → Converted to patch + follow-up story.
+- [x] [Review][Decision][Resolved] `_check_subscription_cancellations` task swallows DLL on retry exhaustion — `retry.py:1288–1292`. **Resolution:** Refactor to derive the account at the failure point inside the per-account loop and write `DeadLetterLog` with proper account context. → Converted to patch.
+- [x] [Review][Decision][Resolved] `docker-compose.yml` does not explicitly list `RESEND_API_KEY` — Task 1.3 requires it. **Resolution:** Add explicit `RESEND_API_KEY: ${RESEND_API_KEY}` lines under `web` and `worker` services. → Converted to patch.
+- [x] [Review][Decision][Resolved] `notification_skipped` for no-email path does not write a `NotificationLog` while every other gate-fail path does. **Resolution:** Add the `NotificationLog(status='suppressed', metadata={reason: 'no_email'})` write so all suppressions are queryable consistently. → Converted to patch.
+
+**Patches:**
+
+- [x] [Review][Patch] **CTA URL must point to SaaS-owner's app, not Stripe** — Replace `https://billing.stripe.com/p/login/{stripe_user_id}` with `account.customer_update_url`. Requires a new `Account.customer_update_url` field (follow-up story to capture this during Stripe Connect onboarding). Spec line 85 must be updated accordingly. `[backend/core/services/email.py:106]`
+- [x] [Review][Patch] **DeadLetterLog on cancellation-task retry exhaustion** — Refactor `_check_subscription_cancellations` to capture the account context inside the per-account loop and write `DeadLetterLog` on exhaustion (NFR-R5). Remove the "Cannot write DeadLetterLog without an account" comment. `[backend/core/tasks/retry.py:1288-1292]`
+- [x] [Review][Patch] **`docker-compose.yml` explicit env listing** — Add `RESEND_API_KEY: ${RESEND_API_KEY}` under both `web` and `worker` services (Task 1.3). `[docker-compose.yml]`
+- [x] [Review][Patch] **No-email path consistency** — Add `NotificationLog(status='suppressed', metadata={reason: 'no_email'})` write alongside the existing `notification_skipped` audit event. `[backend/core/tasks/notifications.py: no-email branch]`
+- [x] [Review][Patch] Resend `api_key` bound at module import with no validation — silent auth failures when `RESEND_API_KEY` is empty `[backend/core/services/email.py:6-12]`
+- [x] [Review][Patch] HTML injection — `company_name`, `subscriber_name`, `label` interpolated into HTML body without `html.escape()` `[backend/core/services/email.py:63-83]`
+- [x] [Review][Patch] From-header injection — display name is not sanitized for `\r\n`, `"`, `<`, `>` before being placed in the From header `[backend/core/services/email.py:26]`
+- [x] [Review][Patch] Subject-header injection — subject built from `company_name` without stripping CRLF `[backend/core/services/email.py:33]`
+- [x] [Review][Patch] Opt-out URL is `f""` literal with no per-recipient token — every subscriber gets the same link, recipient cannot be identified `[backend/core/services/email.py:704]`
+- [x] [Review][Patch] Dead `subscriber_name` greeting — variable always resolves to `""`, greeting is always "Hi," with no name `[backend/core/services/email.py:706-709]`
+- [x] [Review][Patch] Notification dispatch fires unconditionally on `notify_only`/`retry_notify` — Free-tier and no-DPA accounts spawn Celery tasks that immediately suppress, wasting the broker and accumulating one suppressed `NotificationLog` row per polling cycle. Gate at the dispatch site with `is_engine_active(account)` `[backend/core/tasks/polling.py:121-124]`
+- [x] [Review][Patch] Notification dispatched before `ingest_failed_payment` transaction commits — use `transaction.on_commit(lambda: send_failure_notification.delay(failure.id))` to avoid task running against a rolled-back failure id `[backend/core/tasks/polling.py:121-124]`
+- [x] [Review][Patch] `select_for_update()` used outside a `transaction.atomic()` block in `execute_retry` — Django will raise `TransactionManagementError` on every retry `[backend/core/tasks/retry.py:37-42]`
+- [x] [Review][Patch] `MISSED_CYCLE_THRESHOLD_MINUTES = 1500` magic value with misleading inline comment "alerts if daily poll is >1h late" — express as `25 * 60` and align comment `[backend/core/tasks/polling.py:1049]`
+- [ ] [Review][Patch][Deferred to follow-up] Notification duplicate-check is a TOCTOU — `filter().exists()` then `create()`. Add a unique constraint on `(failure, email_type)` for `status='sent'` and catch `IntegrityError` `[backend/core/tasks/notifications.py:69-77]` — needs a new migration; out-of-scope for this review patch batch
+- [x] [Review][Patch] Bare `except Exception` swallows programming errors (`AttributeError`, `KeyError`, `DoesNotExist`) and treats them as transient Resend failures — narrow to Resend SDK exceptions `[backend/core/tasks/notifications.py:110]`
+- [ ] [Review][Patch][Deferred to follow-up] No distinction between transient (rate-limit / 5xx) and permanent (4xx, invalid recipient) Resend errors — permanent errors burn the retry budget pointlessly `[backend/core/tasks/notifications.py:110]` — Resend SDK does not expose typed exceptions; needs HTTP-status inspection helper
+- [x] [Review][Patch] Nested `DeadLetterLog`/`NotificationLog` writes inside the outer `except` block can themselves raise — wrap the inner writes defensively `[backend/core/tasks/notifications.py:107-140]`
+- [x] [Review][Patch] `account.stripe_connection.stripe_user_id` accessed without guard — accounts without a connected Stripe will raise `StripeConnection.DoesNotExist`, retry 3×, dead-letter `[backend/core/services/email.py:106]`
+- [x] [Review][Patch] Resend response may not contain an `id` — `NotificationLog` may be marked `sent` with `resend_message_id=None`. Treat missing id as failure `[backend/core/services/email.py:132]`
+- [x] [Review][Patch] Opt-out lookup is case- and whitespace-sensitive — use `subscriber_email__iexact=subscriber.email.strip()`. CAN-SPAM/GDPR risk if a subscriber opts out with case-different address `[backend/core/tasks/notifications.py:62]`
+- [x] [Review][Patch] `subscriber.email` not normalized before `to=` send — strip and lowercase `[backend/core/services/email.py:127]`
+- [ ] [Review][Patch][Deferred to follow-up] `NotificationLog(status='sent')` is created AFTER the email sends — if the DB write fails, the email goes out but no audit row exists, and the duplicate guard will let the next run re-send. Consider create-pending → send → update-sent `[backend/core/tasks/notifications.py:81-90]` — adds a `pending` enum value + state-machine pattern; bigger refactor than the rest of the batch
+- [x] [Review][Patch] `test_retry_on_api_error` asserts only `pytest.raises(Exception)` — accepts literally any error including programmer mistakes. Tighten to the specific Resend exception or assert `self.retry()` was called `[backend/core/tests/test_tasks/test_notifications.py:1814-1817]`
+
+**Deferred (pre-existing or out-of-scope for Story 4.1):**
+
+- [x] [Review][Defer] `test_dead_letter_on_exhausted_retries` calls the unwrapped `.run.__func__` with a mock `self` instead of going through Celery's real retry path — covers the dead-letter branch but not retry semantics `[test_notifications.py:1820-1839]` — deferred, common pattern; needs Celery integration test
+- [x] [Review][Defer] `schedule_retry` clears `next_retry_at` and saves before calling `_safe_transition`, whose return value is ignored — state and audit can drift if FSM blocks the transition `[backend/core/services/recovery.py:153-156]` — deferred, Story 3.2 scope
+- [x] [Review][Defer] `poll_account_failures` retries indefinitely on `RateLimitError`/`APIConnectionError`/`APIError` — no `max_retries` cap, no dead-letter, exponential backoff is unbounded `[backend/core/tasks/polling.py:1085]` — deferred, Story 3.x polling hardening
+- [x] [Review][Defer] `pending_action_list` reports `len(serializer.data)` as `meta.total` instead of `actions.count()` — misreports total under pagination/filtering `[backend/core/views/actions.py:1903]` — deferred, Story 3.4
+- [x] [Review][Defer] `execute_recovery_action` dispatches Celery tasks inside `transaction.atomic()` — should use `transaction.on_commit` so tasks don't run against rolled-back state `[backend/core/views/actions.py:67-83]` — deferred, Story 3.4
+- [x] [Review][Defer] `action_ids` validation accepts booleans (`isinstance(True, int)` is truthy) — `True`/`False` slip through as id=1/id=0 `[backend/core/views/actions.py:38-43]` — deferred, Story 3.4 minor
+- [x] [Review][Defer] Subscriber state can go stale between queryset load and processing in batch endpoints — `excluded_from_automation` flip not detected `[backend/core/views/actions.py:72]` — deferred, Story 3.4
+- [x] [Review][Defer] `useEffect` selection guard in review-queue does not differentiate "first non-empty load" from "any load" — empty→non-empty→empty→non-empty cycle won't re-select `[frontend/src/app/(dashboard)/review-queue/page.tsx:2107-2117]` — deferred, Story 3.4
+- [x] [Review][Defer] Rapid clicks on Exclude can dispatch duplicate mutations — `isExcluding` not checked at handler entry `[frontend/src/app/(dashboard)/review-queue/page.tsx:64-103]` — deferred, Story 3.4
+- [x] [Review][Defer] Mid-loop failure in batch exclude leaves subset excluded with only one toast — use `Promise.allSettled` to surface partial state `[frontend/src/app/(dashboard)/review-queue/page.tsx:78-86]` — deferred, Story 3.4
+- [x] [Review][Defer] `SAFENET_SENDING_DOMAIN` defaults to `payments.safenet.app`; if not verified in Resend every email will bounce → 3-retry → dead-letter cascade. No startup verification check `[.env.example, settings/base.py]` — deferred, ops/runbook concern
+
+**Dismissed as noise:** stripe top-level exception aliases are exported in `stripe-python>=8` (this repo pins `^15.0.1`); migration 0012 backfill concern N/A (new tables); composite unique index acceptable for the lookup pattern; `celerybeat-schedule` binary already being addressed in working-tree changes; mid-task `is_engine_active` flip is too micro to guard; spec gate-check ordering inconsistency — code follows the dedicated "Gate Check Order" section, which is correct.
+
+**Apply status (2026-04-25):**
+
+- 4 decisions resolved → patches applied (CTA URL via `Account.customer_update_url`, retry.py per-account DLL, docker-compose env, no-email NotificationLog).
+- 21 of 24 patches applied; 3 deferred to follow-ups (TOCTOU unique constraint + migration; Resend transient-vs-permanent classification; NotificationLog pending→sent state machine).
+- Test suite: 26/26 Story 4.1-related tests pass (`test_email.py` + `test_notifications.py`). 10 pre-existing failures on the branch are unrelated to this review (billing webhook, dashboard isolation test from Story 3.5 in-flight, polling missed-cycle threshold mismatch).
+- Required follow-up story: capture `Account.customer_update_url` during Stripe Connect onboarding (Story 2.1 territory). Until that field is populated, `send_notification_email` raises `SkipNotification` and the notification is suppressed with `reason="skip_permanent"`.
+
 ## Dev Notes
 
 ### Architecture Compliance

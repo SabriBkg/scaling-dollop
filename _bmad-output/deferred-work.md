@@ -80,3 +80,34 @@
 - `_safe_transition` has TOCTOU race: `method()` then `save()` without `select_for_update()`. Concurrent workers can overwrite subscriber state. Needs systemic DB-level locking pattern across all FSM transitions.
 - `formatCents` in PendingActionRow.tsx hardcodes USD currency. Multi-currency support is out of scope for this story.
 - `process_retry_result` checks in-memory `subscriber.status` which can be stale from concurrent transitions. `_safe_transition` catches TransitionNotAllowed, but a `refresh_from_db` pattern would be more robust.
+
+## Deferred from: code review of story-3-5 (2026-04-25)
+
+- Backfill / polling-catchup code duplication — `_backfill_recent_failures` (`backend/core/views/account.py`) and `_process_unqueued_failures` (`backend/core/tasks/polling.py`) are near-identical; extract to a shared service when next touching either path.
+- Backfill runs synchronously inside the engine-activation HTTP request (`views/account.py:247`) — risks request timeout for accounts with many recent failures. Move to a Celery task before scaling beyond MVP account sizes.
+- Backfill / polling-catchup: no `select_for_update` on failures or PendingAction creation; concurrent mode-switch + active poll could create duplicate pending actions. Race window is narrow today but should be hardened when concurrency surfaces tighten.
+- `subscriber_list` view (`backend/core/views/subscribers.py`) returns all subscribers in one payload — no DRF pagination. Acceptable while account counts are small; add pagination before scale.
+- `subscriber_list` view has no caching — hit on every poll (5-min refetch × every dashboard tab). Optimization, not correctness.
+- `useSubscribers` hook (`frontend/src/hooks/useSubscribers.ts`) lacks `enabled`/`refetchIntervalInBackground` and has equal `staleTime`/`refetchInterval`. Polling-discipline tweak; harmonize across the hook suite later.
+- Dashboard page (`frontend/src/app/(dashboard)/dashboard/page.tsx`) has no error UI and no empty-state — skeleton spins forever on API error; zero subscribers renders nothing. Address in a broader dashboard UX pass.
+- `DashboardAttentionBar` silently hides on `isError` (`DashboardAttentionBar.tsx:11`). Acceptable for a non-critical bar; revisit when error UX is unified.
+- Activate/mode page invalidates queries then `router.push`es immediately — brief stale-data window on navigation. Low impact.
+- Polling catchup `_process_unqueued_failures` is gated only on `is_engine_active(account)`, not on `account.engine_mode in {autopilot, supervised}`. State desync between the two flags is currently prevented elsewhere; defense-in-depth would re-check.
+- Backfill / polling-catchup skip non-active subscribers — failures on `recovered`/`passive_churn` subscribers never re-evaluated. Confirm intentional with PM; current scope is active-only recovery.
+- Dashboard cache stale on FSM transition (5-minute TTL on `dashboard_summary_*`) — fraud_flag transitions are not invalidated proactively. 5-minute lag is acceptable per current design.
+- `latest_failure` subquery in `subscribers.py:25-28` is not account-scoped — defense-in-depth only; parent queryset is already scoped via `for_account`.
+- Backfill autopilot path emits no `trigger=engine_activation_backfill` audit metadata (only the supervised branch does); relies on `execute_recovery_action`'s own audit. Cross-check audit completeness in a dedicated pass.
+
+## Deferred from: code review of story-4-1-resend-integration-branded-failure-notification-email (2026-04-25)
+
+- `test_dead_letter_on_exhausted_retries` calls `.run.__func__` with a mock `self` instead of going through Celery's real retry path — covers the dead-letter branch but not retry semantics. Needs a Celery integration test.
+- `schedule_retry` (`backend/core/services/recovery.py:153-156`) clears `next_retry_at` and saves before calling `_safe_transition`, whose return value is ignored — state and audit can drift if the FSM blocks the transition. Story 3.2 scope.
+- `poll_account_failures` (`backend/core/tasks/polling.py:1085`) retries indefinitely on `RateLimitError`/`APIConnectionError`/`APIError` — no `max_retries` cap, no dead-letter, exponential backoff is unbounded. Story 3.x polling hardening.
+- `pending_action_list` (`backend/core/views/actions.py:1903`) reports `len(serializer.data)` as `meta.total` instead of `actions.count()` — misreports total under pagination/filtering. Story 3.4.
+- `execute_recovery_action` (`backend/core/views/actions.py:67-83`) dispatches Celery tasks inside `transaction.atomic()` — should use `transaction.on_commit` so tasks don't run against rolled-back state. Story 3.4.
+- `action_ids` validation (`backend/core/views/actions.py:38-43`) accepts booleans (`isinstance(True, int)` is truthy) — `True`/`False` slip through as id=1/id=0. Minor.
+- Subscriber state can go stale between queryset load and processing in batch endpoints (`backend/core/views/actions.py:72`) — `excluded_from_automation` flip not detected mid-batch. Story 3.4.
+- `useEffect` selection guard in `frontend/src/app/(dashboard)/review-queue/page.tsx:2107-2117` does not differentiate "first non-empty load" from "any load" — empty → non-empty → empty → non-empty cycle won't re-select. Story 3.4.
+- Rapid clicks on Exclude (`frontend/src/app/(dashboard)/review-queue/page.tsx:64-103`) can dispatch duplicate mutations — `isExcluding` not checked at handler entry. Story 3.4.
+- Mid-loop failure in batch exclude (`frontend/src/app/(dashboard)/review-queue/page.tsx:78-86`) leaves subset excluded with only one toast — use `Promise.allSettled` to surface partial state. Story 3.4.
+- `SAFENET_SENDING_DOMAIN` defaults to `payments.safenet.app` (`.env.example`, `settings/base.py`); if not verified in Resend every email will bounce → 3-retry → dead-letter cascade. No startup verification check. Ops/runbook concern.

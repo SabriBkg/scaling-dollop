@@ -11,6 +11,13 @@ from core.services.email import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _resend_configured(settings):
+    """Provide a non-empty Resend API key so _ensure_configured passes."""
+    settings.RESEND_API_KEY = "test_key"
+    settings.SAFENET_SENDING_DOMAIN = "payments.safenet.app"
+
+
 class TestBuildFromField:
     def test_includes_company_name(self):
         result = _build_from_field("ProductivityPro")
@@ -41,37 +48,37 @@ class TestBuildSubject:
 
 class TestBuildHtmlBody:
     def test_contains_company_name(self):
-        html = _build_html_body("", "Acme", "insufficient_funds", "https://example.com", "https://optout.com")
+        html = _build_html_body("Acme", "insufficient_funds", "https://example.com", "https://optout.com")
         assert "Acme" in html
 
     def test_contains_failure_explanation(self):
-        html = _build_html_body("", "Acme", "insufficient_funds", "https://example.com", "https://optout.com")
+        html = _build_html_body("Acme", "insufficient_funds", "https://example.com", "https://optout.com")
         assert "Insufficient funds" in html
 
     def test_contains_cta_button(self):
-        html = _build_html_body("", "Acme", "insufficient_funds", "https://billing.example.com", "https://optout.com")
+        html = _build_html_body("Acme", "insufficient_funds", "https://billing.example.com", "https://optout.com")
         assert "https://billing.example.com" in html
         assert "Update Payment Details" in html
 
     def test_contains_opt_out_link(self):
-        html = _build_html_body("", "Acme", "insufficient_funds", "https://example.com", "https://optout.com")
+        html = _build_html_body("Acme", "insufficient_funds", "https://example.com", "https://optout.com")
         assert "https://optout.com" in html
         assert "Unsubscribe" in html
 
     def test_card_expired_access_continues(self):
-        html = _build_html_body("", "Acme", "card_expired", "https://example.com", "https://optout.com")
+        html = _build_html_body("Acme", "card_expired", "https://example.com", "https://optout.com")
         assert "Your access continues while you update your details" in html
 
     def test_expired_card_access_continues(self):
-        html = _build_html_body("", "Acme", "expired_card", "https://example.com", "https://optout.com")
+        html = _build_html_body("Acme", "expired_card", "https://example.com", "https://optout.com")
         assert "Your access continues while you update your details" in html
 
     def test_non_expired_no_access_note(self):
-        html = _build_html_body("", "Acme", "insufficient_funds", "https://example.com", "https://optout.com")
+        html = _build_html_body("Acme", "insufficient_funds", "https://example.com", "https://optout.com")
         assert "Your access continues" not in html
 
     def test_unknown_code_uses_default_label(self):
-        html = _build_html_body("", "Acme", "unknown_code_xyz", "https://example.com", "https://optout.com")
+        html = _build_html_body("Acme", "unknown_code_xyz", "https://example.com", "https://optout.com")
         assert "Payment declined" in html
 
 
@@ -87,6 +94,7 @@ class TestSendNotificationEmail:
 
         account = MagicMock()
         account.company_name = "TestCo"
+        account.customer_update_url = "https://example.com/update"
         account.stripe_connection.stripe_user_id = "acct_test123"
 
         return subscriber, failure, account

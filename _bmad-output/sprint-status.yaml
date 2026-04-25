@@ -50,7 +50,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-06
-last_updated: 2026-04-24
+last_updated: 2026-04-25
 story_3-4_review_done: 2026-04-24
 story_3-3_review_done: 2026-04-24
 story_3-2_review_done: 2026-04-15
@@ -95,12 +95,12 @@ development_status:
   3-2-autopilot-recovery-engine-rule-execution-4-state-status-machine: done
   3-3-card-update-detection-immediate-retry: done
   3-4-supervised-mode-pending-action-queue-batch-approval: done
-  3-5-subscriber-status-cards-attention-bar: review
+  3-5-subscriber-status-cards-attention-bar: done
   epic-3-retrospective: optional
 
   # Epic 4: End-Customer Notification System
   epic-4: in-progress
-  4-1-resend-integration-branded-failure-notification-email: review
+  4-1-resend-integration-branded-failure-notification-email: review-applied
   4-2-tone-selector-settings-live-notification-preview: backlog
   4-3-final-notice-recovery-confirmation-emails: backlog
   4-4-opt-out-mechanism-notification-suppression: backlog

@@ -11,7 +11,11 @@ from core.models.dead_letter import DeadLetterLog
 from core.models.notification import NotificationLog, NotificationOptOut
 from core.models.subscriber import Subscriber, SubscriberFailure
 from core.services.audit import write_audit_event
-from core.services.email import send_notification_email
+from core.services.email import (
+    EmailConfigurationError,
+    SkipNotification,
+    send_notification_email,
+)
 from core.services.tier import is_engine_active
 
 logger = logging.getLogger(__name__)
@@ -40,8 +44,9 @@ def send_failure_notification(self, failure_id: int):
         _log_suppression(subscriber, failure, account, reason="engine_not_active")
         return
 
-    # Gate 2: Subscriber must have an email
-    if not subscriber.email:
+    # Gate 2: Subscriber must have a non-blank email
+    if not (subscriber.email and subscriber.email.strip()):
+        _log_suppression(subscriber, failure, account, reason="no_email")
         write_audit_event(
             subscriber=str(subscriber.id),
             actor="engine",
@@ -59,8 +64,10 @@ def send_failure_notification(self, failure_id: int):
         return
 
     # Gate 4: Opt-out check (stub for Story 4.4)
+    # Case-insensitive + whitespace-trimmed lookup so that opt-outs honour
+    # the address regardless of how it was originally entered.
     if NotificationOptOut.objects.filter(
-        subscriber_email=subscriber.email,
+        subscriber_email__iexact=subscriber.email.strip(),
         account=account,
     ).exists():
         _log_suppression(subscriber, failure, account, reason="opt_out")
@@ -104,37 +111,34 @@ def send_failure_notification(self, failure_id: int):
 
         logger.info("[send_failure_notification] COMPLETE failure_id=%s msg_id=%s", failure_id, msg_id)
 
+    except SkipNotification as exc:
+        # Permanent skip (e.g. account missing customer-update URL). Don't
+        # retry — record as suppressed and move on.
+        logger.info(
+            "[send_failure_notification] SKIPPED failure_id=%s reason=%s",
+            failure_id, exc,
+        )
+        _log_suppression(subscriber, failure, account, reason="skip_permanent")
+        return
+
+    except EmailConfigurationError as exc:
+        # Misconfiguration — retries can't help. Dead-letter immediately so
+        # operators see the alert without a 3-retry delay.
+        logger.error(
+            "[send_failure_notification] CONFIG ERROR failure_id=%s error=%s",
+            failure_id, exc,
+        )
+        _record_failure(subscriber, failure, account, exc)
+        return
+
     except Exception as exc:
+        # Transient / unknown error — retry up to max_retries, then dead-letter.
+        # Programming errors (AttributeError, KeyError, etc.) will land here too,
+        # but they will surface clearly in the DLL row after retries exhaust.
         logger.error("[send_failure_notification] FAILED failure_id=%s error=%s", failure_id, exc)
 
         if self.request.retries >= self.max_retries:
-            DeadLetterLog.objects.create(
-                task_name="send_failure_notification",
-                account=account,
-                error=str(exc),
-            )
-
-            NotificationLog.objects.create(
-                account=account,
-                subscriber=subscriber,
-                failure=failure,
-                email_type="failure_notice",
-                status="failed",
-                metadata={"error": str(exc)},
-            )
-
-            write_audit_event(
-                subscriber=str(subscriber.id),
-                actor="engine",
-                action="notification_failed",
-                outcome="failed",
-                metadata={
-                    "email_type": "failure_notice",
-                    "decline_code": failure.decline_code,
-                    "error": str(exc),
-                },
-                account=account,
-            )
+            _record_failure(subscriber, failure, account, exc)
             return
 
         raise self.retry(exc=exc)
@@ -169,3 +173,43 @@ def _log_suppression(subscriber, failure, account, reason: str):
         reason,
         failure.id,
     )
+
+
+def _record_failure(subscriber, failure, account, exc):
+    """Record a permanent failure to DLL, NotificationLog and audit trail."""
+    try:
+        DeadLetterLog.objects.create(
+            task_name="send_failure_notification",
+            account=account,
+            error=str(exc),
+        )
+    except Exception:
+        logger.exception("[send_failure_notification] DLL write failed")
+
+    try:
+        NotificationLog.objects.create(
+            account=account,
+            subscriber=subscriber,
+            failure=failure,
+            email_type="failure_notice",
+            status="failed",
+            metadata={"error": str(exc)},
+        )
+    except Exception:
+        logger.exception("[send_failure_notification] NotificationLog write failed")
+
+    try:
+        write_audit_event(
+            subscriber=str(subscriber.id),
+            actor="engine",
+            action="notification_failed",
+            outcome="failed",
+            metadata={
+                "email_type": "failure_notice",
+                "decline_code": failure.decline_code,
+                "error": str(exc),
+            },
+            account=account,
+        )
+    except Exception:
+        logger.exception("[send_failure_notification] audit write failed")

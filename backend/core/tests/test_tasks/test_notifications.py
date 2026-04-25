@@ -170,11 +170,20 @@ class TestSendFailureNotification:
 
     @patch("core.tasks.notifications.send_notification_email")
     def test_retry_on_api_error(self, mock_send, failure):
-        """Should retry on Resend API error."""
-        mock_send.side_effect = Exception("API error")
+        """Should call self.retry() on Resend API error before retries exhausted."""
+        mock_send.side_effect = RuntimeError("Resend API error")
 
-        with pytest.raises(Exception):
-            send_failure_notification(failure.id)
+        mock_self = MagicMock()
+        mock_self.request.retries = 0
+        mock_self.max_retries = 3
+        mock_self.retry.side_effect = RuntimeError("retry called")
+
+        task_func = send_failure_notification.run.__func__ if hasattr(send_failure_notification.run, '__func__') else send_failure_notification.run
+
+        with pytest.raises(RuntimeError, match="retry called"):
+            task_func(mock_self, failure.id)
+
+        mock_self.retry.assert_called_once()
 
     @patch("core.tasks.notifications.send_notification_email")
     def test_dead_letter_on_exhausted_retries(self, mock_send, failure):
