@@ -111,3 +111,8 @@
 - Rapid clicks on Exclude (`frontend/src/app/(dashboard)/review-queue/page.tsx:64-103`) can dispatch duplicate mutations — `isExcluding` not checked at handler entry. Story 3.4.
 - Mid-loop failure in batch exclude (`frontend/src/app/(dashboard)/review-queue/page.tsx:78-86`) leaves subset excluded with only one toast — use `Promise.allSettled` to surface partial state. Story 3.4.
 - `SAFENET_SENDING_DOMAIN` defaults to `payments.safenet.app` (`.env.example`, `settings/base.py`); if not verified in Resend every email will bounce → 3-retry → dead-letter cascade. No startup verification check. Ops/runbook concern.
+
+## Deferred from: code review of story-4-2-tone-selector-settings-live-notification-preview (2026-04-26)
+
+- iframe `sandbox=""` in `NotificationPreview.tsx` blocks the CTA link click — UX consideration. A user trying to verify the link destination cannot click through. Surface URL textually beneath the iframe in a follow-up if user feedback warrants it.
+- `useNotificationPreview` `staleTime: 5min` does not invalidate on `complete_profile` flow — if `account.company_name` changes, the preview shows stale text for up to 5 minutes. Cross-story fix: invalidate `["notification-preview"]` from the profile-completion handler (or any future endpoint that mutates `company_name`).

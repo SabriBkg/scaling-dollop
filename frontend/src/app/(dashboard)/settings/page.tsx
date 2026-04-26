@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useAccount } from "@/hooks/useAccount";
 import { useQueryClient } from "@tanstack/react-query";
 import { TierBadge } from "@/components/settings/TierBadge";
+import { ToneSelector } from "@/components/settings/ToneSelector";
+import { NotificationPreview } from "@/components/settings/NotificationPreview";
 import { UpgradeCTA } from "@/components/dashboard/UpgradeCTA";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -74,6 +76,39 @@ export default function SettingsPage() {
           </div>
         )}
       </section>
+
+      {account && (
+        <section className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-6">
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+            Notifications
+          </h2>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            Choose the voice your subscribers see in payment failure emails.
+          </p>
+          <div className="mt-4 grid gap-6 md:grid-cols-2">
+            <ToneSelector
+              account={account}
+              value={account.notification_tone}
+              onChange={() => {}}
+              disabled={
+                account.tier === "free" ||
+                !account.dpa_accepted ||
+                !account.engine_mode
+              }
+              disabledHint={
+                account.tier === "free"
+                  ? "Upgrade to Mid or Pro to customize your subscriber notifications."
+                  : !account.dpa_accepted
+                    ? "Accept the Data Processing Agreement to enable tone selection."
+                    : !account.engine_mode
+                      ? "Activate the recovery engine to enable tone selection."
+                      : undefined
+              }
+            />
+            <NotificationPreview tone={account.notification_tone} />
+          </div>
+        </section>
+      )}
 
       {account?.dpa_accepted && account.tier !== "free" && (
         <section className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-6">

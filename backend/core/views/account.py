@@ -135,6 +135,7 @@ def _build_account_response(account, user) -> dict:
             "dpa_accepted": account.dpa_accepted,
             "dpa_accepted_at": account.dpa_accepted_at.isoformat() if account.dpa_accepted_at else None,
             "engine_mode": account.engine_mode,
+            "notification_tone": account.notification_tone,
             "created_at": account.created_at.isoformat(),
         }
     }
@@ -245,6 +246,118 @@ def set_engine_mode(request):
     # Backfill unprocessed failures from the last 24 hours into the engine queue
     if changed and is_engine_active(account):
         _backfill_recent_failures(account)
+
+    return Response(_build_account_response(account, request.user))
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def notification_preview(request):
+    """Render a sample notification email so the client can preview tone copy."""
+    try:
+        account = request.user.account
+    except request.user.__class__.account.RelatedObjectDoesNotExist:
+        raise NotFound("No account associated with this user.")
+
+    from core.models.account import DEFAULT_TONE, TONE_CHOICES
+    from core.services.email import _build_html_body, _build_subject
+
+    valid_tones = {value for value, _ in TONE_CHOICES}
+    # Distinguish "param omitted" (None) from "param empty string". The former
+    # falls back to the saved tone; the latter is a client bug we surface as 400.
+    raw_tone = request.query_params.get("tone")
+    if raw_tone is None:
+        tone = account.notification_tone or DEFAULT_TONE
+    else:
+        tone = raw_tone
+    if tone not in valid_tones:
+        return Response(
+            {"error": {"code": "INVALID_TONE", "message": "Tone must be 'professional', 'friendly', or 'minimal'."}},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    sample_subscriber_email = "subscriber@example.com"
+    sample_decline_code = "card_expired"
+    company_name = account.company_name or "Your Service"
+    portal_url = getattr(account, "customer_update_url", "") or "https://your-app.example.com/billing"
+    opt_out_url = "https://app.safenet.app/notifications/opt-out"
+
+    subject = _build_subject(sample_decline_code, company_name, tone)
+    html_body = _build_html_body(
+        company_name=company_name,
+        decline_code=sample_decline_code,
+        portal_url=portal_url,
+        opt_out_url=opt_out_url,
+        tone=tone,
+    )
+
+    return Response({
+        "data": {
+            "tone": tone,
+            "subject": subject,
+            "html_body": html_body,
+            "sample_subscriber_email": sample_subscriber_email,
+            "sample_decline_code": sample_decline_code,
+        }
+    })
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def set_notification_tone(request):
+    """Set the account's notification tone preset (Mid/Pro tier only)."""
+    try:
+        account = request.user.account
+    except request.user.__class__.account.RelatedObjectDoesNotExist:
+        raise NotFound("No account associated with this user.")
+
+    from core.models.account import TONE_CHOICES
+
+    tone = request.data.get("tone")
+    valid_tones = {value for value, _ in TONE_CHOICES}
+    if tone not in valid_tones:
+        return Response(
+            {"error": {"code": "INVALID_TONE", "message": "Tone must be 'professional', 'friendly', or 'minimal'."}},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    with transaction.atomic():
+        from core.models.account import Account, TIER_FREE
+        account = Account.objects.select_for_update().get(pk=account.pk)
+
+        if account.tier == TIER_FREE:
+            return Response(
+                {"error": {"code": "TIER_NOT_ELIGIBLE", "message": "Notification tone is only available for Mid and Pro tier accounts."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not account.dpa_accepted:
+            return Response(
+                {"error": {"code": "DPA_NOT_ACCEPTED", "message": "You must accept the Data Processing Agreement before changing the notification tone."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not account.engine_mode:
+            return Response(
+                {"error": {"code": "ENGINE_MODE_NOT_SET", "message": "Activate the recovery engine before changing the notification tone."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        old_tone = account.notification_tone
+        if old_tone == tone:
+            pass  # idempotent — no change needed
+        else:
+            account.notification_tone = tone
+            account.save(update_fields=["notification_tone"])
+
+            write_audit_event(
+                subscriber=None,
+                actor="client",
+                action="notification_tone_changed",
+                outcome="success",
+                metadata={"from": old_tone, "to": tone},
+                account=account,
+            )
 
     return Response(_build_account_response(account, request.user))
 
