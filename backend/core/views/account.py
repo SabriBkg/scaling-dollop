@@ -135,6 +135,7 @@ def _build_account_response(account, user) -> dict:
             "dpa_accepted": account.dpa_accepted,
             "dpa_accepted_at": account.dpa_accepted_at.isoformat() if account.dpa_accepted_at else None,
             "engine_mode": account.engine_mode,
+            "notification_tone": account.notification_tone,
             "created_at": account.created_at.isoformat(),
         }
     }
@@ -249,6 +250,118 @@ def set_engine_mode(request):
     return Response(_build_account_response(account, request.user))
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def notification_preview(request):
+    """Render a sample notification email so the client can preview tone copy."""
+    try:
+        account = request.user.account
+    except request.user.__class__.account.RelatedObjectDoesNotExist:
+        raise NotFound("No account associated with this user.")
+
+    from core.models.account import DEFAULT_TONE, TONE_CHOICES
+    from core.services.email import _build_html_body, _build_subject
+
+    valid_tones = {value for value, _ in TONE_CHOICES}
+    # Distinguish "param omitted" (None) from "param empty string". The former
+    # falls back to the saved tone; the latter is a client bug we surface as 400.
+    raw_tone = request.query_params.get("tone")
+    if raw_tone is None:
+        tone = account.notification_tone or DEFAULT_TONE
+    else:
+        tone = raw_tone
+    if tone not in valid_tones:
+        return Response(
+            {"error": {"code": "INVALID_TONE", "message": "Tone must be 'professional', 'friendly', or 'minimal'."}},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    sample_subscriber_email = "subscriber@example.com"
+    sample_decline_code = "card_expired"
+    company_name = account.company_name or "Your Service"
+    portal_url = getattr(account, "customer_update_url", "") or "https://your-app.example.com/billing"
+    opt_out_url = "https://app.safenet.app/notifications/opt-out"
+
+    subject = _build_subject(sample_decline_code, company_name, tone)
+    html_body = _build_html_body(
+        company_name=company_name,
+        decline_code=sample_decline_code,
+        portal_url=portal_url,
+        opt_out_url=opt_out_url,
+        tone=tone,
+    )
+
+    return Response({
+        "data": {
+            "tone": tone,
+            "subject": subject,
+            "html_body": html_body,
+            "sample_subscriber_email": sample_subscriber_email,
+            "sample_decline_code": sample_decline_code,
+        }
+    })
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def set_notification_tone(request):
+    """Set the account's notification tone preset (Mid/Pro tier only)."""
+    try:
+        account = request.user.account
+    except request.user.__class__.account.RelatedObjectDoesNotExist:
+        raise NotFound("No account associated with this user.")
+
+    from core.models.account import TONE_CHOICES
+
+    tone = request.data.get("tone")
+    valid_tones = {value for value, _ in TONE_CHOICES}
+    if tone not in valid_tones:
+        return Response(
+            {"error": {"code": "INVALID_TONE", "message": "Tone must be 'professional', 'friendly', or 'minimal'."}},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    with transaction.atomic():
+        from core.models.account import Account, TIER_FREE
+        account = Account.objects.select_for_update().get(pk=account.pk)
+
+        if account.tier == TIER_FREE:
+            return Response(
+                {"error": {"code": "TIER_NOT_ELIGIBLE", "message": "Notification tone is only available for Mid and Pro tier accounts."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not account.dpa_accepted:
+            return Response(
+                {"error": {"code": "DPA_NOT_ACCEPTED", "message": "You must accept the Data Processing Agreement before changing the notification tone."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not account.engine_mode:
+            return Response(
+                {"error": {"code": "ENGINE_MODE_NOT_SET", "message": "Activate the recovery engine before changing the notification tone."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        old_tone = account.notification_tone
+        if old_tone == tone:
+            pass  # idempotent — no change needed
+        else:
+            account.notification_tone = tone
+            account.save(update_fields=["notification_tone"])
+
+            write_audit_event(
+                subscriber=None,
+                actor="client",
+                action="notification_tone_changed",
+                outcome="success",
+                metadata={"from": old_tone, "to": tone},
+                account=account,
+            )
+
+    return Response(_build_account_response(account, request.user))
+
+
 def _first_error_message(errors: dict) -> str:
     for field, messages in errors.items():
         if isinstance(messages, list):
@@ -287,6 +400,7 @@ def _backfill_recent_failures(account):
     cutoff = timezone.now() - timedelta(hours=24)
 
     # Failures in the last 24h for active subscribers that have no pending action yet
+    # and are not already in flight (next_retry_at set or retry_count > 0).
     failures = (
         SubscriberFailure.objects
         .for_account(account.id)
@@ -294,6 +408,8 @@ def _backfill_recent_failures(account):
             failure_created_at__gte=cutoff,
             subscriber__status=STATUS_ACTIVE,
             subscriber__excluded_from_automation=False,
+            next_retry_at__isnull=True,
+            retry_count=0,
         )
         .exclude(
             pending_actions__status=STATUS_PENDING,
@@ -303,44 +419,50 @@ def _backfill_recent_failures(account):
 
     backfilled = 0
     for failure in failures:
-        decision = get_recovery_action(
-            failure.decline_code,
-            payment_method_country=failure.payment_method_country,
-        )
+        try:
+            decision = get_recovery_action(
+                failure.decline_code,
+                payment_method_country=failure.payment_method_country,
+            )
 
-        if decision.action == ACTION_NO_ACTION:
-            continue
+            if decision.action == ACTION_NO_ACTION:
+                continue
 
-        if decision.action == ACTION_FRAUD_FLAG:
-            execute_recovery_action(failure, decision, account)
+            if decision.action == ACTION_FRAUD_FLAG:
+                execute_recovery_action(failure, decision, account)
+                backfilled += 1
+                continue
+
+            if account.engine_mode == "autopilot":
+                execute_recovery_action(failure, decision, account)
+            elif account.engine_mode == "supervised":
+                PendingAction.objects.create(
+                    account=account,
+                    subscriber=failure.subscriber,
+                    failure=failure,
+                    recommended_action=decision.action,
+                    recommended_retry_cap=decision.retry_cap,
+                    recommended_payday_aware=decision.payday_aware,
+                )
+                write_audit_event(
+                    subscriber=str(failure.subscriber.id),
+                    actor="engine",
+                    action="action_queued_supervised",
+                    outcome="success",
+                    metadata={
+                        "failure_id": str(failure.id),
+                        "recommended_action": decision.action,
+                        "decline_code": failure.decline_code,
+                        "trigger": "engine_activation_backfill",
+                    },
+                    account=account,
+                )
             backfilled += 1
+        except Exception:
+            logger.exception(
+                "Backfill failed for failure %s on account %s", failure.id, account.id
+            )
             continue
-
-        if account.engine_mode == "autopilot":
-            execute_recovery_action(failure, decision, account)
-        elif account.engine_mode == "supervised":
-            PendingAction.objects.create(
-                account=account,
-                subscriber=failure.subscriber,
-                failure=failure,
-                recommended_action=decision.action,
-                recommended_retry_cap=decision.retry_cap,
-                recommended_payday_aware=decision.payday_aware,
-            )
-            write_audit_event(
-                subscriber=str(failure.subscriber.id),
-                actor="engine",
-                action="action_queued_supervised",
-                outcome="success",
-                metadata={
-                    "failure_id": str(failure.id),
-                    "recommended_action": decision.action,
-                    "decline_code": failure.decline_code,
-                    "trigger": "engine_activation_backfill",
-                },
-                account=account,
-            )
-        backfilled += 1
 
     if backfilled:
         logger.info("Backfilled %d recent failures for account %s", backfilled, account.id)

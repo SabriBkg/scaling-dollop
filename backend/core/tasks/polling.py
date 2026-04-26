@@ -1,12 +1,14 @@
 """
-Hourly polling task for new payment failures across all accounts.
-Registered with Celery beat at 3600-second intervals.
+Daily polling task for new payment failures across all accounts.
+Registered with Celery beat at 86400-second intervals (daily).
+Free-tier accounts poll weekly.
 """
 import logging
 from datetime import timedelta
 
 import stripe
 from django.core.cache import cache
+from django.db import transaction
 from django.utils import timezone
 
 from safenet_backend.celery import app
@@ -18,9 +20,10 @@ from core.services.tier import get_polling_frequency, is_engine_active
 logger = logging.getLogger(__name__)
 
 POLL_LAST_RUN_KEY = "poll:last_run:{account_id}"
-MISSED_CYCLE_THRESHOLD_MINUTES = 90
-# 48-hour TTL so cache survives extended outages without suppressing missed-cycle alerts
-POLL_CACHE_TTL = 48 * 3600
+# Daily poll is expected every 24h; alert when the gap exceeds 25h (1h late).
+MISSED_CYCLE_THRESHOLD_MINUTES = 25 * 60
+# 7-day TTL so cache survives extended outages without suppressing missed-cycle alerts
+POLL_CACHE_TTL = 7 * 86_400
 
 
 @app.task(bind=True)
@@ -95,8 +98,8 @@ def poll_account_failures(self, account_id):
     if last_run_ts:
         created_gte = int(last_run_ts.timestamp())
     else:
-        # First poll — look back 90 minutes to catch any gap
-        fallback = timezone.now() - timedelta(minutes=90)
+        # First poll — look back 25 hours to catch any gap
+        fallback = timezone.now() - timedelta(hours=25)
         created_gte = int(fallback.timestamp())
 
     access_token = connection.access_token
@@ -117,14 +120,29 @@ def poll_account_failures(self, account_id):
             if created:
                 total_created += 1
 
+                # Dispatch notification when engine is active and the rule
+                # produces a notify_only/retry_notify action. Gating here
+                # prevents Free-tier accounts from spawning tasks that would
+                # only suppress themselves. on_commit ensures we never
+                # enqueue a task that references a rolled-back failure id.
+                if (
+                    failure.classified_action in ("notify_only", "retry_notify")
+                    and is_engine_active(account)
+                ):
+                    from core.tasks.notifications import send_failure_notification
+                    failure_id = failure.id
+                    transaction.on_commit(
+                        lambda fid=failure_id: send_failure_notification.delay(fid)
+                    )
+
                 if is_engine_active(account):
                     if account.engine_mode == "autopilot":
                         _process_autopilot_recovery(failure, account)
                     elif account.engine_mode == "supervised":
                         _process_supervised_queue(failure, account)
 
-    except stripe.StripeError as exc:
-        logger.warning("Rate limited during polling for account %s, retrying", account_id)
+    except (stripe.RateLimitError, stripe.APIConnectionError, stripe.APIError) as exc:
+        logger.warning("Transient Stripe error during polling for account %s, retrying: %s", account_id, exc)
         raise self.retry(exc=exc, countdown=2 ** self.request.retries * 30)
 
     # Process any unqueued failures from the last 24h (catches pre-activation gaps)
@@ -164,7 +182,7 @@ def _process_supervised_queue(failure, account):
     """
     from core.engine.processor import get_recovery_action
     from core.engine.state_machine import ACTION_FRAUD_FLAG
-    from core.models.pending_action import PendingAction
+    from core.models.pending_action import PendingAction, STATUS_PENDING
     from core.services.recovery import execute_recovery_action
 
     # Skip excluded subscribers
@@ -181,27 +199,31 @@ def _process_supervised_queue(failure, account):
         execute_recovery_action(failure, decision, account)
         return
 
-    PendingAction.objects.create(
+    _, created = PendingAction.objects.get_or_create(
         account=account,
         subscriber=failure.subscriber,
         failure=failure,
-        recommended_action=decision.action,
-        recommended_retry_cap=decision.retry_cap,
-        recommended_payday_aware=decision.payday_aware,
+        status=STATUS_PENDING,
+        defaults={
+            "recommended_action": decision.action,
+            "recommended_retry_cap": decision.retry_cap,
+            "recommended_payday_aware": decision.payday_aware,
+        },
     )
 
-    write_audit_event(
-        subscriber=str(failure.subscriber.id),
-        actor="engine",
-        action="action_queued_supervised",
-        outcome="success",
-        metadata={
-            "failure_id": str(failure.id),
-            "recommended_action": decision.action,
-            "decline_code": failure.decline_code,
-        },
-        account=account,
-    )
+    if created:
+        write_audit_event(
+            subscriber=str(failure.subscriber.id),
+            actor="engine",
+            action="action_queued_supervised",
+            outcome="success",
+            metadata={
+                "failure_id": str(failure.id),
+                "recommended_action": decision.action,
+                "decline_code": failure.decline_code,
+            },
+            account=account,
+        )
 
 
 def _process_autopilot_recovery(failure, account):
@@ -211,6 +233,10 @@ def _process_autopilot_recovery(failure, account):
     """
     from core.engine.processor import get_recovery_action
     from core.services.recovery import execute_recovery_action
+
+    # Skip excluded subscribers (consistent with supervised path)
+    if failure.subscriber.excluded_from_automation:
+        return
 
     decision = get_recovery_action(
         failure.decline_code,
@@ -270,47 +296,58 @@ def _process_unqueued_failures(account):
 
     processed = 0
     for failure in failures:
-        decision = get_recovery_action(
-            failure.decline_code,
-            payment_method_country=failure.payment_method_country,
-        )
+        try:
+            decision = get_recovery_action(
+                failure.decline_code,
+                payment_method_country=failure.payment_method_country,
+            )
 
-        if decision.action == ACTION_NO_ACTION:
-            continue
+            if decision.action == ACTION_NO_ACTION:
+                continue
 
-        if decision.action == ACTION_FRAUD_FLAG:
-            execute_recovery_action(failure, decision, account)
+            if decision.action == ACTION_FRAUD_FLAG:
+                execute_recovery_action(failure, decision, account)
+                processed += 1
+                continue
+
+            if account.engine_mode == "autopilot":
+                execute_recovery_action(failure, decision, account)
+            elif account.engine_mode == "supervised":
+                PendingAction.objects.create(
+                    account=account,
+                    subscriber=failure.subscriber,
+                    failure=failure,
+                    recommended_action=decision.action,
+                    recommended_retry_cap=decision.retry_cap,
+                    recommended_payday_aware=decision.payday_aware,
+                )
+                write_audit_event(
+                    subscriber=str(failure.subscriber.id),
+                    actor="engine",
+                    action="action_queued_supervised",
+                    outcome="success",
+                    metadata={
+                        "failure_id": str(failure.id),
+                        "recommended_action": decision.action,
+                        "decline_code": failure.decline_code,
+                        "trigger": "unqueued_failure_catchup",
+                    },
+                    account=account,
+                )
             processed += 1
+        except Exception:
+            logger.exception(
+                "Unqueued-failure catchup failed for failure %s on account %s",
+                failure.id,
+                account.id,
+            )
             continue
-
-        if account.engine_mode == "autopilot":
-            execute_recovery_action(failure, decision, account)
-        elif account.engine_mode == "supervised":
-            PendingAction.objects.create(
-                account=account,
-                subscriber=failure.subscriber,
-                failure=failure,
-                recommended_action=decision.action,
-                recommended_retry_cap=decision.retry_cap,
-                recommended_payday_aware=decision.payday_aware,
-            )
-            write_audit_event(
-                subscriber=str(failure.subscriber.id),
-                actor="engine",
-                action="action_queued_supervised",
-                outcome="success",
-                metadata={
-                    "failure_id": str(failure.id),
-                    "recommended_action": decision.action,
-                    "decline_code": failure.decline_code,
-                    "trigger": "unqueued_failure_catchup",
-                },
-                account=account,
-            )
-        processed += 1
 
     if processed:
         logger.info("Processed %d unqueued failures for account %s", processed, account.id)
+        from django.core.cache import cache
+
+        cache.delete(f"dashboard_summary_{account.id}")
 
 
 # Stripe subscription statuses that indicate recovery should stop
@@ -380,7 +417,6 @@ def _detect_card_updates(account, access_token):
     """
     from core.engine.state_machine import STATUS_ACTIVE
     from core.models.subscriber import Subscriber, SubscriberFailure
-    from core.tasks.retry import execute_retry
 
     active_subscribers = (
         Subscriber.objects
@@ -392,8 +428,7 @@ def _detect_card_updates(account, access_token):
         # Only check subscribers with pending failures
         has_pending = SubscriberFailure.objects.for_account(account.id).filter(
             subscriber=subscriber,
-        ).exclude(
-            next_retry_at__isnull=True, retry_count__gte=3,
+            next_retry_at__isnull=False,
         ).exists()
 
         if not has_pending:
@@ -454,6 +489,7 @@ def _queue_immediate_retry(subscriber, account):
     Autopilot: dispatches execute_retry immediately.
     Supervised: creates a PendingAction for client review.
     """
+    from core.engine.state_machine import STATUS_ACTIVE
     from core.models.subscriber import SubscriberFailure
     from core.tasks.retry import execute_retry
 
@@ -463,7 +499,11 @@ def _queue_immediate_retry(subscriber, account):
     failure = (
         SubscriberFailure.objects
         .for_account(account.id)
-        .filter(subscriber=subscriber)
+        .filter(
+            subscriber=subscriber,
+            subscriber__status=STATUS_ACTIVE,
+            next_retry_at__isnull=False,
+        )
         .order_by("-failure_created_at")
         .first()
     )

@@ -11,6 +11,8 @@ export interface User {
   last_name: string;
 }
 
+export type NotificationTone = "professional" | "friendly" | "minimal";
+
 export interface Account {
   id: number;
   owner_email?: string; // backward compat
@@ -27,6 +29,7 @@ export interface Account {
   dpa_accepted: boolean;
   dpa_accepted_at: string | null;
   engine_mode: "autopilot" | "supervised" | null;
+  notification_tone: NotificationTone;
   created_at: string; // ISO 8601
 }
 

@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -8,6 +9,8 @@ from core.models.subscriber import Subscriber, SubscriberFailure
 from core.serializers.actions import PendingActionSerializer
 from core.services.audit import write_audit_event
 from core.services.recovery import execute_recovery_action
+
+MAX_BATCH_SIZE = 100
 
 
 @api_view(["GET"])
@@ -25,7 +28,7 @@ def pending_action_list(request):
     )
 
     serializer = PendingActionSerializer(actions, many=True)
-    return Response({"data": serializer.data, "meta": {"total": actions.count()}})
+    return Response({"data": serializer.data, "meta": {"total": len(serializer.data)}})
 
 
 @api_view(["POST"])
@@ -35,9 +38,21 @@ def batch_approve_actions(request):
     account = request.user.account
     action_ids = request.data.get("action_ids", [])
 
+    if not isinstance(action_ids, list) or not all(isinstance(i, int) for i in action_ids):
+        return Response(
+            {"error": {"code": "INVALID_IDS", "message": "action_ids must be a list of integers.", "field": "action_ids"}},
+            status=400,
+        )
+
     if not action_ids:
         return Response(
             {"error": {"code": "MISSING_IDS", "message": "action_ids is required.", "field": "action_ids"}},
+            status=400,
+        )
+
+    if len(action_ids) > MAX_BATCH_SIZE:
+        return Response(
+            {"error": {"code": "BATCH_TOO_LARGE", "message": f"Maximum {MAX_BATCH_SIZE} actions per batch.", "field": "action_ids"}},
             status=400,
         )
 
@@ -51,23 +66,39 @@ def batch_approve_actions(request):
     approved, failed, failures = 0, 0, []
     for action in actions:
         try:
-            decision = get_recovery_action(
-                action.failure.decline_code,
-                payment_method_country=action.failure.payment_method_country,
-            )
-            execute_recovery_action(action.failure, decision, account)
-            action.status = STATUS_APPROVED
-            action.save(update_fields=["status"])
-            approved += 1
+            with transaction.atomic():
+                # Re-check exclusion status inside transaction
+                if action.subscriber.excluded_from_automation:
+                    failed += 1
+                    failures.append({"id": action.id, "error": "Subscriber is excluded from automation."})
+                    continue
+
+                decision = get_recovery_action(
+                    action.failure.decline_code,
+                    payment_method_country=action.failure.payment_method_country,
+                )
+                execute_recovery_action(action.failure, decision, account)
+                action.status = STATUS_APPROVED
+                action.save(update_fields=["status", "updated_at"])
+                approved += 1
         except Exception as exc:
             failed += 1
-            failures.append({"id": action.id, "error": str(exc)})
+            failures.append({"id": action.id, "error": "Action could not be processed."})
+            write_audit_event(
+                subscriber=str(action.subscriber.id),
+                actor="client",
+                action="batch_action_failed",
+                outcome="failed",
+                metadata={"pending_action_id": action.id, "failure_id": str(action.failure.id)},
+                account=account,
+            )
 
+    outcome = "success" if failed == 0 else ("partial" if approved > 0 else "failed")
     write_audit_event(
         subscriber=None,
         actor="client",
         action="batch_actions_approved",
-        outcome="success",
+        outcome=outcome,
         metadata={"approved": approved, "failed": failed},
         account=account,
     )
@@ -93,10 +124,11 @@ def exclude_subscriber(request, subscriber_id):
     subscriber.save(update_fields=["excluded_from_automation"])
 
     # Mark all pending actions as excluded
+    from django.utils import timezone as tz
     PendingAction.objects.for_account(account.id).filter(
         subscriber=subscriber,
         status=STATUS_PENDING,
-    ).update(status=STATUS_EXCLUDED)
+    ).update(status=STATUS_EXCLUDED, updated_at=tz.now())
 
     # Clear pending retries
     SubscriberFailure.objects.for_account(account.id).filter(

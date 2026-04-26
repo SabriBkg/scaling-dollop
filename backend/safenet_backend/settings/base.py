@@ -139,6 +139,10 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
 }
 
+# Resend (email notifications)
+RESEND_API_KEY = env("RESEND_API_KEY", default="")
+SAFENET_SENDING_DOMAIN = env("SAFENET_SENDING_DOMAIN", default="payments.safenet.app")
+
 # Sentry
 _sentry_dsn = env("SENTRY_DSN", default="")
 if _sentry_dsn:

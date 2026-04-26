@@ -13,6 +13,20 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock("@/hooks/useNotificationPreview", () => ({
+  useNotificationPreview: () => ({
+    data: {
+      tone: "professional",
+      subject: "Sample subject",
+      html_body: "<p>preview</p>",
+      sample_subscriber_email: "subscriber@example.com",
+      sample_decline_code: "card_expired",
+    },
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -46,8 +60,10 @@ describe("SettingsPage - Mode Switcher", () => {
     render(<SettingsPage />, { wrapper: createWrapper() });
     expect(screen.getByText("Recovery Mode")).toBeInTheDocument();
 
-    const radios = screen.getAllByRole("radio");
-    expect(radios).toHaveLength(2);
+    const engineRadios = screen
+      .getAllByRole("radio")
+      .filter((r) => r.getAttribute("name") === "engine_mode");
+    expect(engineRadios).toHaveLength(2);
 
     const autopilotRadio = screen.getByDisplayValue("autopilot");
     expect(autopilotRadio).toBeChecked();

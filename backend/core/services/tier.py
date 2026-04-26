@@ -9,15 +9,15 @@ from django.utils import timezone
 from core.models.account import TIER_FREE, TIER_MID, TIER_PRO
 
 # Polling intervals in seconds
-POLLING_FREQ_HOURLY = 3600  # Mid/Pro
-POLLING_FREQ_TWICE_MONTHLY = 1_296_000  # ~15 days, Free tier
+POLLING_FREQ_DAILY = 86_400  # Mid/Pro
+POLLING_FREQ_WEEKLY = 604_800  # Free tier
 
 
 def get_polling_frequency(account) -> int:
     """Returns seconds between polls based on account tier."""
     if account.tier == TIER_FREE:
-        return POLLING_FREQ_TWICE_MONTHLY
-    return POLLING_FREQ_HOURLY
+        return POLLING_FREQ_WEEKLY
+    return POLLING_FREQ_DAILY
 
 
 def is_engine_active(account) -> bool:

@@ -58,3 +58,61 @@
 - Expired trial accounts retain Mid-tier privileges for up to 24h until daily celery beat job runs. `set_engine_mode` and `is_engine_active` don't inline-check trial expiry. Architectural decision: consider calling `check_and_degrade_trial` inline in account-mutating endpoints, or increasing celery beat frequency.
 - Frontend stale cache after webhook-driven downgrade — React Query continues showing `engine_active: true`, old tier, and engine mode until next refetch (window focus or polling interval). Would need WebSocket/SSE push or shorter staleTime to mitigate.
 - `STRIPE_WEBHOOK_SECRET` defaults to empty string at module level — warning logs and runtime guard added in story 2-5 review, but should be a hard startup error in production environments to prevent fail-open risk.
+
+## Deferred from: code review of story-3-2 (2026-04-15)
+
+- N+1 Stripe API calls in `_check_subscription_cancellations` and `_detect_card_updates` — iterates all active subscribers making individual API calls per subscriber with no batching or rate limiting. Will hit Stripe rate limits at scale.
+- Cache loss causes `_process_unqueued_failures` to potentially re-dispatch recovery actions for already-processed failures. Idempotent ingestion guards new failures, but recovery actions could duplicate.
+- `SubscriberFailure.amount_cents` is `IntegerField` (max ~2.1B) — potential overflow for high-value JPY/KRW transactions. Consider `BigIntegerField`.
+- Stripe `PaymentIntent.confirm` on `requires_payment_method` status will always fail without first attaching the subscriber's updated payment method. Retries burn business retry counts without actually re-charging. Needs a dedicated story to fetch default PM from Customer and attach to PI before confirming.
+
+## Deferred from: code review of story-3-3 (2026-04-24)
+
+- N+1 Stripe API calls in `_detect_card_updates` — 1 `Customer.retrieve` per active subscriber with pending failures. Spec Task 5.3 requires batching but it was not implemented. Will hit Stripe rate limits at scale.
+- N+1 Stripe API calls in `_check_subscription_cancellations` — Same N+1 pattern with `Subscription.list` per subscriber. Combined with card detection, 2+ API calls per subscriber per poll cycle.
+- Race condition: fingerprint read-modify-write in `_detect_card_updates` without `select_for_update` or atomic block. Concurrent polls for the same account could cause lost fingerprint updates. Low risk since daily polls are serialized by Celery.
+- `cancel_at_period_end` in `_check_subscription_cancellations` transitions subscriber to `passive_churn` while subscription is still active until period ends, prematurely stopping recovery efforts.
+
+## Deferred from: code review of story-3-4 (2026-04-24)
+
+- `_check_subscription_cancellations` calls `subscriber.mark_passive_churn()` directly instead of `_safe_transition()` — TransitionNotAllowed would crash the entire polling task for that account. Pre-existing; fix when touching subscription cancellation logic.
+- Business logic (decision re-derivation + execution loop) lives inline in `batch_approve_actions` view instead of a service function. Violates "no business logic in views" constraint. Functional as-is; refactor when adding batch action features.
+- `_safe_transition` has TOCTOU race: `method()` then `save()` without `select_for_update()`. Concurrent workers can overwrite subscriber state. Needs systemic DB-level locking pattern across all FSM transitions.
+- `formatCents` in PendingActionRow.tsx hardcodes USD currency. Multi-currency support is out of scope for this story.
+- `process_retry_result` checks in-memory `subscriber.status` which can be stale from concurrent transitions. `_safe_transition` catches TransitionNotAllowed, but a `refresh_from_db` pattern would be more robust.
+
+## Deferred from: code review of story-3-5 (2026-04-25)
+
+- Backfill / polling-catchup code duplication — `_backfill_recent_failures` (`backend/core/views/account.py`) and `_process_unqueued_failures` (`backend/core/tasks/polling.py`) are near-identical; extract to a shared service when next touching either path.
+- Backfill runs synchronously inside the engine-activation HTTP request (`views/account.py:247`) — risks request timeout for accounts with many recent failures. Move to a Celery task before scaling beyond MVP account sizes.
+- Backfill / polling-catchup: no `select_for_update` on failures or PendingAction creation; concurrent mode-switch + active poll could create duplicate pending actions. Race window is narrow today but should be hardened when concurrency surfaces tighten.
+- `subscriber_list` view (`backend/core/views/subscribers.py`) returns all subscribers in one payload — no DRF pagination. Acceptable while account counts are small; add pagination before scale.
+- `subscriber_list` view has no caching — hit on every poll (5-min refetch × every dashboard tab). Optimization, not correctness.
+- `useSubscribers` hook (`frontend/src/hooks/useSubscribers.ts`) lacks `enabled`/`refetchIntervalInBackground` and has equal `staleTime`/`refetchInterval`. Polling-discipline tweak; harmonize across the hook suite later.
+- Dashboard page (`frontend/src/app/(dashboard)/dashboard/page.tsx`) has no error UI and no empty-state — skeleton spins forever on API error; zero subscribers renders nothing. Address in a broader dashboard UX pass.
+- `DashboardAttentionBar` silently hides on `isError` (`DashboardAttentionBar.tsx:11`). Acceptable for a non-critical bar; revisit when error UX is unified.
+- Activate/mode page invalidates queries then `router.push`es immediately — brief stale-data window on navigation. Low impact.
+- Polling catchup `_process_unqueued_failures` is gated only on `is_engine_active(account)`, not on `account.engine_mode in {autopilot, supervised}`. State desync between the two flags is currently prevented elsewhere; defense-in-depth would re-check.
+- Backfill / polling-catchup skip non-active subscribers — failures on `recovered`/`passive_churn` subscribers never re-evaluated. Confirm intentional with PM; current scope is active-only recovery.
+- Dashboard cache stale on FSM transition (5-minute TTL on `dashboard_summary_*`) — fraud_flag transitions are not invalidated proactively. 5-minute lag is acceptable per current design.
+- `latest_failure` subquery in `subscribers.py:25-28` is not account-scoped — defense-in-depth only; parent queryset is already scoped via `for_account`.
+- Backfill autopilot path emits no `trigger=engine_activation_backfill` audit metadata (only the supervised branch does); relies on `execute_recovery_action`'s own audit. Cross-check audit completeness in a dedicated pass.
+
+## Deferred from: code review of story-4-1-resend-integration-branded-failure-notification-email (2026-04-25)
+
+- `test_dead_letter_on_exhausted_retries` calls `.run.__func__` with a mock `self` instead of going through Celery's real retry path — covers the dead-letter branch but not retry semantics. Needs a Celery integration test.
+- `schedule_retry` (`backend/core/services/recovery.py:153-156`) clears `next_retry_at` and saves before calling `_safe_transition`, whose return value is ignored — state and audit can drift if the FSM blocks the transition. Story 3.2 scope.
+- `poll_account_failures` (`backend/core/tasks/polling.py:1085`) retries indefinitely on `RateLimitError`/`APIConnectionError`/`APIError` — no `max_retries` cap, no dead-letter, exponential backoff is unbounded. Story 3.x polling hardening.
+- `pending_action_list` (`backend/core/views/actions.py:1903`) reports `len(serializer.data)` as `meta.total` instead of `actions.count()` — misreports total under pagination/filtering. Story 3.4.
+- `execute_recovery_action` (`backend/core/views/actions.py:67-83`) dispatches Celery tasks inside `transaction.atomic()` — should use `transaction.on_commit` so tasks don't run against rolled-back state. Story 3.4.
+- `action_ids` validation (`backend/core/views/actions.py:38-43`) accepts booleans (`isinstance(True, int)` is truthy) — `True`/`False` slip through as id=1/id=0. Minor.
+- Subscriber state can go stale between queryset load and processing in batch endpoints (`backend/core/views/actions.py:72`) — `excluded_from_automation` flip not detected mid-batch. Story 3.4.
+- `useEffect` selection guard in `frontend/src/app/(dashboard)/review-queue/page.tsx:2107-2117` does not differentiate "first non-empty load" from "any load" — empty → non-empty → empty → non-empty cycle won't re-select. Story 3.4.
+- Rapid clicks on Exclude (`frontend/src/app/(dashboard)/review-queue/page.tsx:64-103`) can dispatch duplicate mutations — `isExcluding` not checked at handler entry. Story 3.4.
+- Mid-loop failure in batch exclude (`frontend/src/app/(dashboard)/review-queue/page.tsx:78-86`) leaves subset excluded with only one toast — use `Promise.allSettled` to surface partial state. Story 3.4.
+- `SAFENET_SENDING_DOMAIN` defaults to `payments.safenet.app` (`.env.example`, `settings/base.py`); if not verified in Resend every email will bounce → 3-retry → dead-letter cascade. No startup verification check. Ops/runbook concern.
+
+## Deferred from: code review of story-4-2-tone-selector-settings-live-notification-preview (2026-04-26)
+
+- iframe `sandbox=""` in `NotificationPreview.tsx` blocks the CTA link click — UX consideration. A user trying to verify the link destination cannot click through. Surface URL textually beneath the iframe in a follow-up if user feedback warrants it.
+- `useNotificationPreview` `staleTime: 5min` does not invalidate on `complete_profile` flow — if `account.company_name` changes, the preview shows stale text for up to 5 minutes. Cross-story fix: invalidate `["notification-preview"]` from the profile-completion handler (or any future endpoint that mutates `company_name`).

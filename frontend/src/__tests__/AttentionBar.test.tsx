@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+
+const mockPush = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush, replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+}));
+
 import { AttentionBar } from "@/components/dashboard/AttentionBar";
 import type { AttentionItem } from "@/types/dashboard";
 
@@ -27,8 +33,8 @@ describe("AttentionBar", () => {
   });
 
   it("is hidden when no items", () => {
-    const { container } = render(<AttentionBar items={[]} nextScanAt={null} />);
-    expect(container.innerHTML).toBe("");
+    render(<AttentionBar items={[]} nextScanAt={null} />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders singular text for 1 item", () => {
@@ -57,5 +63,26 @@ describe("AttentionBar", () => {
     expect(
       screen.getByText(/Review before next engine cycle/)
     ).toBeInTheDocument();
+  });
+
+  it("returns empty countdown for invalid nextScanAt", () => {
+    render(<AttentionBar items={mockItems} nextScanAt="not-a-date" />);
+    expect(
+      screen.queryByText(/Review before next engine cycle/)
+    ).not.toBeInTheDocument();
+  });
+
+  it("navigates to review queue when a pending_action pill is clicked", () => {
+    mockPush.mockClear();
+    render(<AttentionBar items={mockItems} nextScanAt={null} />);
+    fireEvent.click(screen.getByText("bob@example.com"));
+    expect(mockPush).toHaveBeenCalledWith("/review-queue");
+  });
+
+  it("does not navigate when a fraud_flag pill is clicked", () => {
+    mockPush.mockClear();
+    render(<AttentionBar items={mockItems} nextScanAt={null} />);
+    fireEvent.click(screen.getByText("alice@example.com"));
+    expect(mockPush).not.toHaveBeenCalled();
   });
 });

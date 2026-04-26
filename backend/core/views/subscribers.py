@@ -45,7 +45,7 @@ def subscriber_list(request):
             latest_amount_cents=Subquery(latest_failure.values("amount_cents")[:1]),
             has_pending_action=Case(
                 When(Q(pk__in=Subquery(
-                    PendingAction.objects.filter(
+                    PendingAction.objects.for_account(account.id).filter(
                         status=STATUS_PENDING,
                     ).values("subscriber_id")
                 )), then=Value(True)),

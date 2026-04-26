@@ -1,6 +1,6 @@
 # Story 3.5: Subscriber Status Cards & Attention Bar
 
-Status: review
+Status: done
 
 ## Story
 
@@ -159,6 +159,12 @@ so that I can spot fraud flags and urgent cases without scanning the entire subs
 - Frontend: `frontend/src/components/dashboard/SubscriberCard.tsx` (new), `frontend/src/components/dashboard/SubscriberGrid.tsx` (new), `frontend/src/components/dashboard/AttentionBar.tsx` (new), `frontend/src/components/subscriber/StatusBadge.tsx` (new), `frontend/src/hooks/useSubscribers.ts` (new), `frontend/src/types/subscriber.ts` (new)
 - Modified: `backend/core/urls.py` (add subscriber list route), `backend/core/serializers/dashboard.py` (add attention_items), `backend/core/views/dashboard.py` (compute attention items), `frontend/src/types/dashboard.ts` (add AttentionItem type), `frontend/src/app/(dashboard)/dashboard/page.tsx` (integrate SubscriberGrid + AttentionBar)
 
+### Scope Clarifications (decided during code review, 2026-04-25)
+
+- **Subscriber grid scope**: The grid intentionally shows only subscribers that have at least one `SubscriberFailure` (filter `failures__isnull=False` in `subscribers.py`). The grid is the operator's recovery surface, not a customer roster — subscribers without failures have nothing to recover and would render with null `decline_code`/`amount_cents`. AC1/AC3's "4 status variants" refers to subscribers being routed through the engine, all of which have at least one failure to display.
+- **Attention pill navigation**: `pending_action` pills navigate to `/review-queue`. `fraud_flag` and `retry_cap` pills are intentional noops until the subscriber detail panel ships in Story 5.1.
+- **Engine activation backfill / polling catchup**: `_backfill_recent_failures` (`views/account.py`) and `_process_unqueued_failures` (`tasks/polling.py`) were added in this commit to ensure pre-activation failures surface in the new `attention_items` list. Functionally adjacent to Story 3.5; accepted in this PR rather than split into a separate Epic 3 hardening story.
+
 ### References
 
 - [Source: _bmad-output/epics.md#Story 3.5] — Full acceptance criteria and BDD scenarios
@@ -189,6 +195,48 @@ Claude Opus 4.6
 
 ### Change Log
 - 2026-04-15: Implemented Story 3.5 — Subscriber Status Cards & Attention Bar (all 10 tasks)
+- 2026-04-25: Code review findings appended (3 decisions, 15 patches, 14 deferred)
+- 2026-04-25: Code review patches applied (18 of 18); decisions resolved and documented in Scope Clarifications
+
+### Review Findings
+
+#### Decisions Needed
+- [x] [Review][Decision] AC5 — Attention pills do not navigate — `AttentionBar.tsx:64-66` onClick is comment-only. AC5 requires pills to navigate to subscriber detail or review queue. Subscriber detail panel is Story 5.1 (not built); review queue (`/review-queue`) exists. Options: (A) wire `pending_action` pills to `/review-queue`, leave fraud/retry as noop until 5.1; (B) wire all pills to `/review-queue`; (C) waive AC5 explicitly until 5.1.
+- [x] [Review][Decision] Subscriber grid filter excludes subscribers without failures — `views/subscribers.py:41` `.filter(failures__isnull=False)` hides any subscriber that never had a failure. AC1/AC3 list all 4 status variants including Active. Confirm: grid is "managed/recovery subscribers only" (keep filter, document in story) or "all subscribers" (remove filter and adjust card to handle missing decline_code).
+- [x] [Review][Decision] Out-of-scope additions in commit — Story 3.5 task list does not include `_backfill_recent_failures` (`views/account.py`, ~80 LOC + tests), `_process_unqueued_failures` (`tasks/polling.py`, ~80 LOC + tests), or query invalidations in `activate/mode/page.tsx` and `settings/page.tsx`. Confirm these belong in this PR or split into a separate Epic 3 hardening story.
+
+#### Patches
+- [x] [Review][Patch] AC1 — SubscriberCard sub-label is broken [`frontend/src/components/dashboard/SubscriberCard.tsx:53`] — `{subscriber.email && subscriber.stripe_customer_id}` evaluates to `stripe_customer_id` when email is truthy and to falsy/empty when email is missing. Sub-label should be a stable identifier (likely `{subscriber.stripe_customer_id}`).
+- [x] [Review][Patch] Tenant-isolation leak in pending-action subquery [`backend/core/views/subscribers.py:47-50`] — `PendingAction.objects.filter(status=STATUS_PENDING)` is not account-scoped. Use `PendingAction.objects.for_account(account.id).filter(status=STATUS_PENDING)`.
+- [x] [Review][Patch] Retry-cap loop emits duplicate attention items per subscriber [`backend/core/views/dashboard.py:139-151`] — Iterates failures, not distinct subscribers; a subscriber with N near-cap failures appears N times. Track seen `subscriber_id`s and skip duplicates.
+- [x] [Review][Patch] AttentionBar countdown captured at render, never updates [`frontend/src/components/dashboard/AttentionBar.tsx:13`] — `Date.now()` is evaluated once at render. Add `useEffect` + `setInterval` to refresh every minute (or use a `now` state ticker).
+- [x] [Review][Patch] AttentionBar formatCountdown returns "NaNm" on invalid date [`frontend/src/components/dashboard/AttentionBar.tsx:11-19`] — Guard `isNaN(diff)` early and return `""`.
+- [x] [Review][Patch] AC4 — Countdown text hidden on mobile [`frontend/src/components/dashboard/AttentionBar.tsx:48`] — `hidden sm:inline` removes "Review before next engine cycle in Xm", which AC4 lists as a required element. Remove the responsive hide (or wrap it instead of hiding).
+- [x] [Review][Patch] Attention items unbounded — UI overflow risk [`backend/core/views/dashboard.py:111-151`, `frontend/src/components/dashboard/AttentionBar.tsx:53-71`] — Cap at top-N (e.g., 10) on the server, with a `+N more` affordance in the bar.
+- [x] [Review][Patch] Hardcoded `"active"` string instead of `STATUS_ACTIVE` [`backend/core/views/dashboard.py:141`] — Module already imports `STATUS_FRAUD_FLAGGED`; import `STATUS_ACTIVE` and use the constant.
+- [x] [Review][Patch] Backfill can re-execute in-flight retries [`backend/core/views/account.py:298-302`] — Filter excludes already-pending actions but not failures with `next_retry_at` set or `retry_count > 0` (autopilot path). Add `retry_count=0, next_retry_at__isnull=True` to match polling's `_process_unqueued_failures` filter.
+- [x] [Review][Patch] Backfill/polling-catchup: per-failure exception aborts the loop [`backend/core/views/account.py:305-343`, `backend/core/tasks/polling.py:_process_unqueued_failures`] — Wrap loop body in try/except, log + continue.
+- [x] [Review][Patch] Polling catchup doesn't invalidate dashboard cache [`backend/core/tasks/polling.py:_process_unqueued_failures`] — After `processed > 0`, call `cache.delete(f"dashboard_summary_{account.id}")`.
+- [x] [Review][Patch] SubscriberCard cursor-pointer is a misleading affordance [`frontend/src/components/dashboard/SubscriberCard.tsx:23,29`] — `cursor-pointer` with comment-only onClick suggests interactivity that doesn't exist. Remove `cursor-pointer` (and onClick) until Story 5.1 wires navigation.
+- [x] [Review][Patch] Test uses brittle innerHTML check [`frontend/src/__tests__/AttentionBar.test.tsx`] — Replace `expect(container.innerHTML).toBe("")` with `expect(container).toBeEmptyDOMElement()` or `queryByRole("alert")` returning null.
+- [x] [Review][Patch] Missing tenant-isolation test for attention_items [`backend/core/tests/test_api/test_dashboard.py`] — Given the related leak in subscriber_list (P2), add a test asserting another tenant's `fraud_flagged` subscriber does NOT leak into this account's `attention_items`.
+- [x] [Review][Patch] `backend/celerybeat-schedule` binary committed — Add to `.gitignore` and remove from the index.
+
+#### Deferred
+- [x] [Review][Defer] Backfill / polling-catchup code duplication — `_backfill_recent_failures` and `_process_unqueued_failures` are near-identical; extract to a service. Deferred: refactor outside Story 3.5 scope.
+- [x] [Review][Defer] Backfill runs synchronously inside HTTP request [`views/account.py:247`] — Move to a Celery task to avoid timeout for accounts with many recent failures. Deferred: works for typical account sizes; revisit when scale demands it.
+- [x] [Review][Defer] Backfill / polling: no `select_for_update`, race on duplicate PendingAction creation. Deferred: race window is narrow (mode-switch + active poll); harden when concurrency surfaces become tighter.
+- [x] [Review][Defer] `subscriber_list`: no pagination [`views/subscribers.py`] — Returns all subscribers in one payload. Deferred: acceptable while account subscriber counts are small; add DRF pagination before scale.
+- [x] [Review][Defer] `subscriber_list`: no caching — Hit on every poll. Deferred: optimization, not correctness.
+- [x] [Review][Defer] `useSubscribers`: missing `enabled`, `refetchIntervalInBackground`, `staleTime` mismatch [`frontend/src/hooks/useSubscribers.ts`] — Polling discipline tweaks. Deferred: matches existing hooks; harmonize across the suite later.
+- [x] [Review][Defer] Dashboard page: no error UI / no empty-state [`frontend/src/app/(dashboard)/dashboard/page.tsx`] — Skeleton stays forever on API error; empty subscribers renders nothing. Deferred: align with broader dashboard UX pass.
+- [x] [Review][Defer] DashboardAttentionBar silently hides on `isError` [`DashboardAttentionBar.tsx:11`] — Acceptable for a non-critical bar; revisit when error UX is unified.
+- [x] [Review][Defer] Activate/mode page: invalidate races `router.push` [`activate/mode/page.tsx:48-50`] — Brief stale data window on navigation. Deferred: low impact.
+- [x] [Review][Defer] Polling catchup not gated on `engine_mode` [`tasks/polling.py:_process_unqueued_failures`] — Relies solely on `is_engine_active`. Deferred: state desync between mode and active flag is currently prevented elsewhere.
+- [x] [Review][Defer] Backfill / polling skip non-active subscribers [`account.py`, `polling.py`] — `recovered`/`passive_churn` failures never re-evaluated. Deferred: confirm intentional with PM; current scope is active-only recovery.
+- [x] [Review][Defer] Dashboard cache stale on FSM transition [`views/dashboard.py`] — Up to 5-minute lag before fraud_flag becomes visible. Deferred: 5-minute lag is acceptable per current cache TTL.
+- [x] [Review][Defer] `latest_failure` subquery in `subscribers.py` not account-scoped [`views/subscribers.py:25-28`] — Defense-in-depth; parent queryset already scoped. Deferred: cosmetic hygiene.
+- [x] [Review][Defer] Backfill autopilot path: no `trigger=engine_activation_backfill` audit metadata [`account.py:319-320`] — Audit emitted only in supervised branch; autopilot path relies on `execute_recovery_action`'s own audit. Deferred: cross-check audit completeness in a dedicated pass.
 
 ### File List
 **New files:**
@@ -214,3 +262,14 @@ Claude Opus 4.6
 - frontend/src/types/dashboard.ts (added AttentionItem interface + attention_items to DashboardSummary)
 - frontend/src/app/(dashboard)/layout.tsx (added DashboardAttentionBar)
 - frontend/src/app/(dashboard)/dashboard/page.tsx (integrated SubscriberGrid)
+
+**Engine-hardening additions (out-of-scope for the original task list, accepted into this PR — see Scope Clarifications):**
+- backend/core/views/account.py (`_backfill_recent_failures` — engine-activation backfill of unqueued failures)
+- backend/core/tasks/polling.py (`_process_unqueued_failures` — poll-cycle catchup for pre-activation failures)
+- backend/core/tests/test_api/test_engine_mode.py (`TestEngineActivationBackfill`)
+- backend/core/tests/test_tasks/test_polling_supervised.py (`TestProcessUnqueuedFailures`)
+- frontend/src/app/(dashboard)/activate/mode/page.tsx (TanStack query invalidations after mode change)
+- frontend/src/app/(dashboard)/settings/page.tsx (TanStack query invalidations after mode change)
+
+**Code-review patches (2026-04-25):**
+- .gitignore (added `celerybeat-schedule*`; binary removed from index)

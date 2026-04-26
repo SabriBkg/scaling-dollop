@@ -7,7 +7,9 @@ from rest_framework.response import Response
 
 from core.engine.labels import DECLINE_CODE_LABELS
 from core.engine.rules import DECLINE_RULES
-from core.engine.state_machine import STATUS_RECOVERED, STATUS_FRAUD_FLAGGED
+from core.engine.state_machine import STATUS_ACTIVE, STATUS_RECOVERED, STATUS_FRAUD_FLAGGED
+
+ATTENTION_ITEMS_CAP = 10
 from core.models.pending_action import PendingAction, STATUS_PENDING
 from core.models.subscriber import Subscriber, SubscriberFailure
 from core.serializers.dashboard import DashboardSummarySerializer
@@ -106,12 +108,14 @@ def _build_summary(account_id):
     )
 
     # Attention items: fraud flags, pending actions, retry cap approaching
+    # Capped at ATTENTION_ITEMS_CAP total; priority: fraud → pending → retry_cap.
     attention_items = []
+    seen_retry_cap = set()
 
     # Fraud-flagged subscribers
     fraud_subs = Subscriber.objects.for_account(account_id).filter(
         status=STATUS_FRAUD_FLAGGED,
-    )
+    )[:ATTENTION_ITEMS_CAP]
     for sub in fraud_subs:
         attention_items.append({
             "type": "fraud_flag",
@@ -121,28 +125,36 @@ def _build_summary(account_id):
         })
 
     # Pending actions (supervised mode)
-    pending_actions = (
-        PendingAction.objects.for_account(account_id)
-        .filter(status=STATUS_PENDING)
-        .select_related("subscriber")
-    )
-    for pa in pending_actions:
-        sub = pa.subscriber
-        attention_items.append({
-            "type": "pending_action",
-            "subscriber_id": sub.id,
-            "subscriber_name": sub.email or sub.stripe_customer_id,
-            "label": f"Pending approval: {sub.email or sub.stripe_customer_id}",
-        })
+    if len(attention_items) < ATTENTION_ITEMS_CAP:
+        pending_actions = (
+            PendingAction.objects.for_account(account_id)
+            .filter(status=STATUS_PENDING)
+            .select_related("subscriber")
+        )[: ATTENTION_ITEMS_CAP - len(attention_items)]
+        for pa in pending_actions:
+            sub = pa.subscriber
+            attention_items.append({
+                "type": "pending_action",
+                "subscriber_id": sub.id,
+                "subscriber_name": sub.email or sub.stripe_customer_id,
+                "label": f"Pending approval: {sub.email or sub.stripe_customer_id}",
+            })
 
     # Retry cap approaching (retry_count >= retry_cap - 1, where retry_cap > 0)
-    for failure in (
-        SubscriberFailure.objects.for_account(account_id)
-        .filter(subscriber__status="active")
-        .select_related("subscriber")
-    ):
-        rule = DECLINE_RULES.get(failure.decline_code, DECLINE_RULES.get("_default"))
-        if rule and rule["retry_cap"] > 0 and failure.retry_count >= rule["retry_cap"] - 1:
+    if len(attention_items) < ATTENTION_ITEMS_CAP:
+        for failure in (
+            SubscriberFailure.objects.for_account(account_id)
+            .filter(subscriber__status=STATUS_ACTIVE)
+            .select_related("subscriber")
+        ):
+            if len(attention_items) >= ATTENTION_ITEMS_CAP:
+                break
+            rule = DECLINE_RULES.get(failure.decline_code, DECLINE_RULES.get("_default"))
+            if not (rule and rule["retry_cap"] > 0 and failure.retry_count >= rule["retry_cap"] - 1):
+                continue
+            if failure.subscriber_id in seen_retry_cap:
+                continue
+            seen_retry_cap.add(failure.subscriber_id)
             attention_items.append({
                 "type": "retry_cap",
                 "subscriber_id": failure.subscriber_id,

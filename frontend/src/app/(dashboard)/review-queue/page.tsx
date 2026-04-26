@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { usePendingActions } from "@/hooks/usePendingActions";
 import { useBatchAction } from "@/hooks/useBatchAction";
@@ -16,11 +16,13 @@ export default function ReviewQueuePage() {
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [exclusionDialogOpen, setExclusionDialogOpen] = useState(false);
+  const initialSelectionDone = useRef(false);
 
-  // Pre-select all rows on load
+  // Pre-select all rows only on initial load
   useEffect(() => {
-    if (actions && actions.length > 0) {
+    if (actions && actions.length > 0 && !initialSelectionDone.current) {
       setSelected(new Set(actions.map((a) => a.id)));
+      initialSelectionDone.current = true;
     }
   }, [actions]);
 
@@ -59,25 +61,46 @@ export default function ReviewQueuePage() {
     });
   }, [selected, batchMutation]);
 
-  const handleExclude = useCallback(() => {
+  const [isExcluding, setIsExcluding] = useState(false);
+
+  const handleExclude = useCallback(async () => {
     if (!actions) return;
-    // Get unique subscriber IDs from selected actions
-    const subscriberIds = new Set(
-      actions
-        .filter((a) => selected.has(a.id))
-        .map((a) => a.subscriber_id)
+    const subscriberIds = Array.from(
+      new Set(
+        actions
+          .filter((a) => selected.has(a.id))
+          .map((a) => a.subscriber_id)
+      )
     );
 
-    // Exclude each unique subscriber
-    subscriberIds.forEach((subId) => {
-      excludeMutation.mutate(subId, {
-        onSuccess: () => {
-          toast.success("Subscriber excluded from automation");
-          setSelected(new Set());
-        },
-      });
-    });
+    setIsExcluding(true);
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const subId of subscriberIds) {
+      try {
+        await excludeMutation.mutateAsync(subId);
+        succeeded++;
+      } catch {
+        failed++;
+      }
+    }
+
+    setIsExcluding(false);
     setExclusionDialogOpen(false);
+    setSelected(new Set());
+
+    if (failed > 0 && succeeded > 0) {
+      toast.warning(`${succeeded} excluded, ${failed} failed`, { duration: 6000 });
+    } else if (failed > 0) {
+      toast.error("Failed to exclude subscribers", { duration: Infinity });
+    } else {
+      toast.success(
+        succeeded === 1
+          ? "Subscriber excluded from automation"
+          : `${succeeded} subscribers excluded from automation`
+      );
+    }
   }, [actions, selected, excludeMutation]);
 
   if (isLoading) {
@@ -157,7 +180,7 @@ export default function ReviewQueuePage() {
         open={exclusionDialogOpen}
         onOpenChange={setExclusionDialogOpen}
         onConfirm={handleExclude}
-        isPending={excludeMutation.isPending}
+        isPending={isExcluding}
       />
     </div>
   );

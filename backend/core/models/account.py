@@ -15,6 +15,18 @@ TIER_CHOICES = [
     (TIER_PRO, "Pro"),
 ]
 
+TONE_PROFESSIONAL = "professional"
+TONE_FRIENDLY = "friendly"
+TONE_MINIMAL = "minimal"
+
+TONE_CHOICES = [
+    (TONE_PROFESSIONAL, "Professional"),
+    (TONE_FRIENDLY, "Friendly"),
+    (TONE_MINIMAL, "Minimal"),
+]
+
+DEFAULT_TONE = TONE_PROFESSIONAL
+
 
 class Account(models.Model):
     """
@@ -42,6 +54,11 @@ class Account(models.Model):
         blank=True,
     )
     company_name = models.CharField(max_length=200, blank=True, default="")
+    notification_tone = models.CharField(
+        max_length=20,
+        choices=TONE_CHOICES,
+        default=DEFAULT_TONE,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

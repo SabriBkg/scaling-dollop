@@ -26,7 +26,7 @@ export function BatchActionToolbar({
     >
       <div className="mx-auto flex max-w-[1280px] items-center justify-between">
         <span className="text-sm text-[var(--text-secondary)]">
-          {selectedCount} subscriber{selectedCount !== 1 ? "s" : ""} selected
+          {selectedCount} action{selectedCount !== 1 ? "s" : ""} selected
         </span>
         <div className="flex items-center gap-2">
           <button

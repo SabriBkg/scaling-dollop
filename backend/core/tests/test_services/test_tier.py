@@ -8,23 +8,23 @@ from core.models.account import Account, TIER_FREE, TIER_MID, TIER_PRO
 
 @pytest.mark.django_db
 class TestGetPollingFrequency:
-    def test_mid_tier_returns_hourly(self, account):
+    def test_mid_tier_returns_daily(self, account):
         account.tier = TIER_MID
         account.save()
         from core.services.tier import get_polling_frequency
-        assert get_polling_frequency(account) == 3600
+        assert get_polling_frequency(account) == 86_400
 
-    def test_pro_tier_returns_hourly(self, account):
+    def test_pro_tier_returns_daily(self, account):
         account.tier = TIER_PRO
         account.save()
         from core.services.tier import get_polling_frequency
-        assert get_polling_frequency(account) == 3600
+        assert get_polling_frequency(account) == 86_400
 
-    def test_free_tier_returns_fifteen_days(self, account):
+    def test_free_tier_returns_weekly(self, account):
         account.tier = TIER_FREE
         account.save()
         from core.services.tier import get_polling_frequency
-        assert get_polling_frequency(account) == 1_296_000
+        assert get_polling_frequency(account) == 604_800
 
 
 @pytest.mark.django_db

@@ -254,6 +254,7 @@ class TestQueueImmediateRetry:
             amount_cents=1000,
             failure_created_at=datetime(2026, 1, 1, tzinfo=dt_tz.utc),
             classified_action="retry_notify",
+            next_retry_at=datetime(2026, 1, 10, tzinfo=dt_tz.utc),
         )
         new_failure = SubscriberFailure.objects.create(
             subscriber=subscriber,
@@ -263,6 +264,7 @@ class TestQueueImmediateRetry:
             amount_cents=2000,
             failure_created_at=datetime(2026, 3, 1, tzinfo=dt_tz.utc),
             classified_action="retry_notify",
+            next_retry_at=datetime(2026, 3, 10, tzinfo=dt_tz.utc),
         )
 
         with patch("core.tasks.polling.write_audit_event"):

@@ -11,6 +11,7 @@ import logging
 from datetime import timedelta
 
 from django.utils import timezone
+from django_fsm import TransitionNotAllowed
 
 from core.engine.payday import next_payday_retry_window
 from core.engine.processor import RecoveryDecision
@@ -29,6 +30,37 @@ logger = logging.getLogger(__name__)
 DEFAULT_RETRY_DELAY_SECONDS = 3600  # 1 hour
 
 
+def _safe_transition(subscriber, transition_name, account):
+    """
+    Attempt an FSM transition, catching TransitionNotAllowed if the subscriber
+    was concurrently transitioned by another task. Logs an audit event on conflict.
+
+    Returns True if the transition succeeded, False if it was blocked.
+    """
+    method = getattr(subscriber, transition_name)
+    try:
+        method()
+        subscriber.save()
+        return True
+    except TransitionNotAllowed:
+        logger.warning(
+            "FSM transition %s blocked for subscriber %s (current status: %s)",
+            transition_name, subscriber.id, subscriber.status,
+        )
+        write_audit_event(
+            subscriber=str(subscriber.id),
+            actor="engine",
+            action=f"transition_blocked_{transition_name}",
+            outcome="skipped",
+            metadata={
+                "current_status": subscriber.status,
+                "attempted_transition": transition_name,
+            },
+            account=account,
+        )
+        return False
+
+
 def execute_recovery_action(failure, decision: RecoveryDecision, account):
     """
     Execute the recovery action determined by the rule engine.
@@ -42,13 +74,12 @@ def execute_recovery_action(failure, decision: RecoveryDecision, account):
     action = decision.action
 
     if action == ACTION_FRAUD_FLAG:
-        subscriber.mark_fraud_flagged()
-        subscriber.save()
+        transitioned = _safe_transition(subscriber, "mark_fraud_flagged", account)
         write_audit_event(
             subscriber=str(subscriber.id),
             actor="engine",
             action="recovery_fraud_flagged",
-            outcome="success",
+            outcome="success" if transitioned else "skipped",
             metadata={
                 "decline_code": decision.decline_code,
                 "failure_id": str(failure.id),
@@ -119,9 +150,12 @@ def schedule_retry(failure, decision: RecoveryDecision):
 
     # Check retry cap
     if failure.retry_count >= decision.retry_cap:
+        # Clear stale next_retry_at so this failure doesn't appear in pending queries
+        failure.next_retry_at = None
+        failure.save(update_fields=["next_retry_at"])
+
         if subscriber.status == STATUS_ACTIVE:
-            subscriber.mark_passive_churn()
-            subscriber.save()
+            _safe_transition(subscriber, "mark_passive_churn", account)
         write_audit_event(
             subscriber=str(subscriber.id),
             actor="engine",
@@ -184,8 +218,7 @@ def process_retry_result(failure, success: bool):
         failure.save(update_fields=["retry_count", "last_retry_at", "next_retry_at"])
 
         if subscriber.status == STATUS_ACTIVE:
-            subscriber.recover()
-            subscriber.save()
+            _safe_transition(subscriber, "recover", account)
 
         write_audit_event(
             subscriber=str(subscriber.id),

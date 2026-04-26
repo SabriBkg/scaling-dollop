@@ -1,6 +1,6 @@
 # Story 3.2: Autopilot Recovery Engine — Rule Execution & 4-State Status Machine
 
-Status: review
+Status: done
 
 ## Story
 
@@ -266,6 +266,33 @@ Claude Opus 4.6
 - Task 7: Wired polling task to trigger recovery for Autopilot accounts. Added geo-compliance override audit logging. Supervised accounts skip (Story 3.4).
 - Task 8: Added subscription cancellation detection during polling. Transitions to passive_churn and clears pending retries on cancelled/unpaid/paused/cancel_at_period_end.
 - Task 9: 42 new tests across 4 test files covering all ACs: FSM transitions (valid + invalid), audit signals, recovery service actions, payday scheduling, retry cap, geo-compliance, retry tasks, dead-letter, subscription cancellation, polling integration.
+
+### Review Findings
+
+#### Decision Resolved
+- [x] [Review][Decision→Patch] **Concurrent retry execution race condition** — resolved: add `select_for_update()` in `execute_retry`
+- [x] [Review][Decision→Patch] **`TransitionNotAllowed` never caught** — resolved: catch and log as audit event, skip transition
+- [x] [Review][Decision→Defer] **Stripe `PaymentIntent.confirm` on `requires_payment_method` status** — deferred: known limitation, needs dedicated story to attach updated payment method before confirm
+- [x] [Review][Decision→Patch] **Transient Stripe errors consumed as business retry failures** — resolved: distinguish retryable vs permanent Stripe errors
+
+#### Patches
+- [x] [Review][Patch] Retry dispatcher beat schedule is 86400s (daily) instead of 900s (15 min) [celery.py:25] — FIXED
+- [x] [Review][Patch] `execute_retry` imports `transaction` but never uses it — wrap confirm+process in `transaction.atomic()` [retry.py] — FIXED
+- [x] [Review][Patch] `_detect_card_updates` exclude filter logic inverted — replaced with `filter(next_retry_at__isnull=False)` [polling.py] — FIXED
+- [x] [Review][Patch] `_queue_immediate_retry` picks most recent failure without checking retry cap or active status [polling.py] — FIXED: added `subscriber__status` and `next_retry_at` filters
+- [x] [Review][Patch] `excluded_from_automation` not checked in `_process_autopilot_recovery` [polling.py] — FIXED
+- [x] [Review][Patch] ~~Off-by-one in retry cap~~ — DISMISSED: verified correct (3 attempts for cap=3, test confirms)
+- [x] [Review][Patch] `execute_pending_retries` missing dead-letter handling [retry.py] — FIXED: added try/except with error logging (DeadLetterLog requires account FK, so using logger.error)
+- [x] [Review][Patch] `process_retry_result` failure path doesn't clear stale `next_retry_at` [recovery.py] — FIXED: `schedule_retry` now clears `next_retry_at` on cap exhaustion
+- [x] [Review][Patch] Add `select_for_update()` in `execute_retry` [retry.py] — FIXED
+- [x] [Review][Patch] Catch `TransitionNotAllowed` in recovery service [recovery.py] — FIXED: added `_safe_transition()` helper with audit logging
+- [x] [Review][Patch] Distinguish retryable vs permanent Stripe errors in `execute_retry` [retry.py] — FIXED: `RateLimitError`/`APIConnectionError` use `self.retry()`, others burn count
+
+#### Deferred (pre-existing)
+- [x] [Review][Defer] N+1 Stripe API calls in `_check_subscription_cancellations` and `_detect_card_updates` — no batching or rate limiting [polling.py] — deferred, pre-existing
+- [x] [Review][Defer] Cache loss causes `_process_unqueued_failures` to potentially re-dispatch recovery actions [polling.py] — deferred, pre-existing
+- [x] [Review][Defer] `SubscriberFailure.amount_cents` is `IntegerField` — potential overflow for high-value JPY/KRW transactions [subscriber.py:72] — deferred, pre-existing
+- [x] [Review][Defer] Stripe `PaymentIntent.confirm` cannot succeed on `requires_payment_method` without attaching updated payment method first — needs dedicated story [retry.py:54] — deferred, decision from review
 
 ### Change Log
 - 2026-04-14: Story 3.2 implementation complete — recovery engine, FSM, retry system, polling integration, subscription detection. 3 deferred bugs fixed.

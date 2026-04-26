@@ -7,13 +7,13 @@ def test_celery_app_configured():
     assert app.main == "safenet_backend"
 
 
-def test_celery_beat_schedule_has_hourly_poll():
+def test_celery_beat_schedule_has_daily_poll():
     from safenet_backend.celery import app
 
-    assert "hourly-retry-poll" in app.conf.beat_schedule
-    schedule_entry = app.conf.beat_schedule["hourly-retry-poll"]
+    assert "daily-failure-poll" in app.conf.beat_schedule
+    schedule_entry = app.conf.beat_schedule["daily-failure-poll"]
     assert schedule_entry["task"] == "core.tasks.polling.poll_new_failures"
-    assert schedule_entry["schedule"] == 3600.0
+    assert schedule_entry["schedule"] == 86400.0
 
 
 def test_trivial_task_executes():

@@ -17,6 +17,13 @@ from core.services.recovery import process_retry_result
 
 logger = logging.getLogger(__name__)
 
+# Stripe error types that are transient and should use Celery retry
+# rather than burning a business retry count
+TRANSIENT_STRIPE_ERRORS = (
+    stripe.RateLimitError,
+    stripe.APIConnectionError,
+)
+
 
 @app.task(bind=True, max_retries=3, default_retry_delay=60)
 def execute_retry(self, failure_id):
@@ -26,12 +33,17 @@ def execute_retry(self, failure_id):
     """
     logger.info("START execute_retry failure_id=%s", failure_id)
 
+    # Look up the failure inside an atomic block so select_for_update() is
+    # legal. The lock is released as soon as the block exits — we only need
+    # it to prevent two concurrent workers from picking the same row.
     try:
-        failure = (
-            SubscriberFailure.objects
-            .select_related("subscriber", "account")
-            .get(id=failure_id)
-        )
+        with transaction.atomic():
+            failure = (
+                SubscriberFailure.objects
+                .select_related("subscriber", "account")
+                .select_for_update()
+                .get(id=failure_id)
+            )
     except SubscriberFailure.DoesNotExist:
         logger.warning("SubscriberFailure %s not found, skipping retry", failure_id)
         return {"failure_id": failure_id, "skipped": True, "reason": "not_found"}
@@ -56,16 +68,26 @@ def execute_retry(self, failure_id):
             api_key=connection.access_token,
         )
         success = result.status == "succeeded"
-        process_retry_result(failure, success=success)
+        with transaction.atomic():
+            process_retry_result(failure, success=success)
         logger.info("COMPLETE execute_retry failure_id=%s success=%s", failure_id, success)
         return {"failure_id": failure_id, "success": success}
 
+    except TRANSIENT_STRIPE_ERRORS as exc:
+        # Transient Stripe errors — use Celery retry, don't burn business retry count
+        logger.warning(
+            "Transient Stripe error during retry for failure %s: %s, Celery retry %d/%d",
+            failure_id, str(exc), self.request.retries, self.max_retries,
+        )
+        raise self.retry(exc=exc)
+
     except stripe.StripeError as exc:
-        # Stripe API error — treat as failed retry
+        # Permanent Stripe error — treat as failed retry
         logger.warning(
             "Stripe error during retry for failure %s: %s", failure_id, str(exc)
         )
-        process_retry_result(failure, success=False)
+        with transaction.atomic():
+            process_retry_result(failure, success=False)
         return {"failure_id": failure_id, "success": False, "error": str(exc)}
 
     except Exception as exc:
@@ -90,7 +112,7 @@ def execute_pending_retries(self):
     now = timezone.now()
     pending = (
         SubscriberFailure.objects
-        .select_related("subscriber")
+        .select_related("subscriber", "account")
         .filter(
             next_retry_at__lte=now,
             subscriber__status=STATUS_ACTIVE,
@@ -99,8 +121,27 @@ def execute_pending_retries(self):
 
     dispatched = 0
     for failure in pending:
-        execute_retry.delay(failure.id)
-        dispatched += 1
+        # Per-failure dispatch errors are attributable to a specific account,
+        # so write a DeadLetterLog with proper tenant scoping (NFR-R5).
+        try:
+            execute_retry.delay(failure.id)
+            dispatched += 1
+        except Exception as exc:
+            logger.error(
+                "FAILED to dispatch retry for failure_id=%s account=%s error=%s",
+                failure.id, failure.account_id, exc,
+            )
+            try:
+                DeadLetterLog.objects.create(
+                    account=failure.account,
+                    task_name="execute_pending_retries",
+                    error=f"dispatch_failed failure_id={failure.id} error={exc!r}",
+                )
+            except Exception:
+                logger.exception(
+                    "DeadLetterLog write failed for failure_id=%s", failure.id,
+                )
+            continue
 
     logger.info("COMPLETE execute_pending_retries dispatched=%d", dispatched)
     return {"dispatched": dispatched}

@@ -1,6 +1,6 @@
 # Story 3.3: Card-Update Detection & Immediate Retry
 
-Status: review
+Status: done
 
 ## Story
 
@@ -183,6 +183,17 @@ Claude Opus 4.6
 
 ### Change Log
 - 2026-04-14: Story 3.3 implementation complete — card-update detection, immediate retry, fingerprint tracking, failure ingestion baseline.
+
+### Review Findings
+
+- [x] [Review][Patch] Supervised mode skips `card_update_detected` audit event — AC1 requires `{action: "retry_queued", metadata: {trigger: "card_update_detected"}}` on every card-update retry. In supervised mode, `_queue_immediate_retry` delegates to `_process_supervised_queue` which writes `action_queued_supervised` with no `card_update_detected` trigger metadata. [polling.py:488-490]
+- [x] [Review][Patch] Overly broad `stripe.StripeError` catch retries non-retryable errors — Changed from `stripe.error.RateLimitError` to `stripe.StripeError`, which includes `AuthenticationError`, `InvalidRequestError`, etc. Retrying these wastes retry budget and will never succeed. Log message still says "Rate limited". [polling.py:131-133]
+- [x] [Review][Patch] Test `test_queues_most_recent_failure` fixtures lack `next_retry_at` — Both `old_failure` and `new_failure` are created without `next_retry_at`, but the query filters `next_retry_at__isnull=False`. Test only passes because of the `failure` fixture (which has `next_retry_at`), not the two explicitly created failures. Doesn't validate the "most recent" selection. [test_card_update_detection.py:249-266]
+- [x] [Review][Patch] Unused `execute_retry` import in `_detect_card_updates` — Imports at function scope but delegates to `_queue_immediate_retry` which does its own import. Dead code. [polling.py:397]
+- [x] [Review][Defer] N+1 Stripe API calls in `_detect_card_updates` — 1 `Customer.retrieve` call per active subscriber with pending failures. Spec Task 5.3 says "batch Customer.retrieve calls, respect Stripe rate limits with exponential backoff" but batching was not implemented. Will hit rate limits at scale. — deferred, scale optimization
+- [x] [Review][Defer] N+1 Stripe API calls in `_check_subscription_cancellations` — Same N+1 pattern with `Subscription.list` per subscriber. Combined with card detection, a poll cycle makes 2+ API calls per subscriber. — deferred, pre-existing (story 3.5)
+- [x] [Review][Defer] Race condition: fingerprint read-modify-write without locking — No `select_for_update` or atomic block around fingerprint comparison and update. Concurrent polls for same account could cause lost updates. Low risk since polls are daily and serialized by Celery. — deferred, concurrency hardening
+- [x] [Review][Defer] `cancel_at_period_end` transitions subscriber to passive_churn prematurely — Subscription is still active until period ends. Stopping recovery while subscription is live may miss recoverable payments. — deferred, pre-existing (story 3.5)
 
 ### File List
 New files:

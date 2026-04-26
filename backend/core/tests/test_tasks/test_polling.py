@@ -1,4 +1,4 @@
-"""Tests for the hourly failure polling task."""
+"""Tests for the daily failure polling task."""
 import pytest
 from unittest.mock import patch, MagicMock
 from datetime import timedelta
@@ -27,6 +27,13 @@ def _clear_cache():
     cache.clear()
     yield
     cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _mock_notification_dispatch():
+    """Prevent notification task dispatch from trying to connect to Redis."""
+    with patch("core.tasks.notifications.send_failure_notification.delay") as mock_notify:
+        yield mock_notify
 
 
 def _make_payment_intent(pi_id="pi_poll1", decline_code="expired_card", amount=2000, customer="cus_poll"):
@@ -122,8 +129,8 @@ class TestPollAccountFailures:
         import stripe
         _make_stripe_connection(account)
 
-        with patch("core.tasks.polling.stripe.PaymentIntent.list", side_effect=stripe.error.RateLimitError("rate limited")):
-            with pytest.raises(stripe.error.RateLimitError):
+        with patch("core.tasks.polling.stripe.PaymentIntent.list", side_effect=stripe.RateLimitError("rate limited")):
+            with pytest.raises(stripe.RateLimitError):
                 poll_account_failures(account.id)
 
     def test_audit_event_on_completion(self, account):
