@@ -156,3 +156,208 @@ class TestProcessRetryResult:
         assert failure.retry_count == 3
         failure.subscriber.refresh_from_db()
         assert failure.subscriber.status == STATUS_PASSIVE_CHURN
+
+
+# ---------------------------------------------------------------------------
+# Story 4.3 — final notice & recovery confirmation dispatch
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mid_active_account(account):
+    """Account configured to keep the engine active (Mid + DPA + autopilot)."""
+    from django.utils import timezone
+    from core.models.account import TIER_MID
+    account.tier = TIER_MID
+    account.dpa_accepted_at = timezone.now()
+    account.engine_mode = "autopilot"
+    account.company_name = "TestCo"
+    account.save()
+    return account
+
+
+@pytest.mark.django_db(transaction=True)
+class TestFinalNoticeDispatch:
+    """Final notice dispatches from schedule_retry on the LAST permitted retry."""
+
+    @patch("core.tasks.notifications.send_final_notice.delay")
+    def test_dispatched_on_last_retry(self, mock_delay, failure, mid_active_account):
+        # retry_cap=3, retry_count=2 → upcoming retry is #3 → IS last
+        failure.retry_count = 2
+        failure.save()
+        decision = _make_decision(retry_cap=3)
+
+        from django.db import transaction as django_transaction
+        with django_transaction.atomic():
+            schedule_retry(failure, decision)
+        mock_delay.assert_called_once_with(failure.id)
+
+    @patch("core.tasks.notifications.send_final_notice.delay")
+    def test_not_dispatched_when_not_last_retry(self, mock_delay, failure, mid_active_account):
+        failure.retry_count = 0
+        failure.save()
+        decision = _make_decision(retry_cap=3)
+
+        from django.db import transaction as django_transaction
+        with django_transaction.atomic():
+            schedule_retry(failure, decision)
+        mock_delay.assert_not_called()
+
+    @patch("core.tasks.notifications.send_final_notice.delay")
+    def test_not_dispatched_when_retry_cap_zero(self, mock_delay, failure, mid_active_account):
+        """retry_cap=0 means cap-exhausted branch fires; no final notice."""
+        failure.retry_count = 0
+        failure.save()
+        decision = _make_decision(retry_cap=0)
+
+        from django.db import transaction as django_transaction
+        with django_transaction.atomic():
+            schedule_retry(failure, decision)
+        mock_delay.assert_not_called()
+        # Subscriber should be transitioned to passive_churn (cap-exhausted path)
+        failure.subscriber.refresh_from_db()
+        assert failure.subscriber.status == STATUS_PASSIVE_CHURN
+
+    @patch("core.tasks.notifications.send_final_notice.delay")
+    def test_not_dispatched_when_subscriber_inactive(self, mock_delay, failure, mid_active_account):
+        # Force subscriber out of ACTIVE without going through FSM, then refresh
+        # so the schedule_retry path sees the drift in `subscriber.status`.
+        Subscriber.objects.filter(id=failure.subscriber_id).update(status=STATUS_RECOVERED)
+        failure.subscriber.refresh_from_db()
+        failure.retry_count = 2
+        failure.save()
+        decision = _make_decision(retry_cap=3)
+
+        from django.db import transaction as django_transaction
+        with django_transaction.atomic():
+            schedule_retry(failure, decision)
+        mock_delay.assert_not_called()
+
+    @patch("core.tasks.notifications.send_final_notice.delay")
+    def test_dispatched_after_commit(self, mock_delay, failure, mid_active_account):
+        """on_commit dispatch must NOT fire if surrounding atomic block rolls back."""
+        failure.retry_count = 2
+        failure.save()
+        decision = _make_decision(retry_cap=3)
+
+        from django.db import transaction as django_transaction
+        try:
+            with django_transaction.atomic():
+                schedule_retry(failure, decision)
+                raise RuntimeError("force rollback")
+        except RuntimeError:
+            pass
+        mock_delay.assert_not_called()
+
+    @patch("core.tasks.notifications.send_final_notice.delay")
+    def test_dispatched_when_retry_cap_one(self, mock_delay, failure, mid_active_account):
+        """retry_cap=1: the FIRST retry IS the last retry."""
+        failure.retry_count = 0
+        failure.save()
+        decision = _make_decision(retry_cap=1)
+
+        from django.db import transaction as django_transaction
+        with django_transaction.atomic():
+            schedule_retry(failure, decision)
+        mock_delay.assert_called_once_with(failure.id)
+
+    def test_writes_final_notice_dispatched_audit(self, failure, mid_active_account):
+        from core.models.audit import AuditLog
+        failure.retry_count = 2
+        failure.save()
+        decision = _make_decision(retry_cap=3, decline_code="insufficient_funds")
+
+        from django.db import transaction as django_transaction
+        with patch("core.tasks.notifications.send_final_notice.delay"):
+            with django_transaction.atomic():
+                schedule_retry(failure, decision)
+
+        audit = AuditLog.objects.filter(action="final_notice_dispatched").first()
+        assert audit is not None
+        assert audit.outcome == "success"
+        assert audit.metadata["retry_cap"] == 3
+        assert audit.metadata["retry_number"] == 3
+        assert audit.metadata["decline_code"] == "insufficient_funds"
+        assert audit.metadata["failure_id"] == str(failure.id)
+
+
+@pytest.mark.django_db(transaction=True)
+class TestRecoveryConfirmationDispatch:
+    """Recovery confirmation dispatches from process_retry_result on successful recovery."""
+
+    @patch("core.tasks.notifications.send_recovery_confirmation.delay")
+    def test_dispatched_on_successful_recover(self, mock_delay, failure, mid_active_account):
+        from django.db import transaction as django_transaction
+        with django_transaction.atomic():
+            process_retry_result(failure, success=True)
+
+        mock_delay.assert_called_once_with(failure.id)
+        failure.subscriber.refresh_from_db()
+        assert failure.subscriber.status == STATUS_RECOVERED
+
+    @patch("core.tasks.notifications.send_recovery_confirmation.delay")
+    def test_not_dispatched_on_failed_retry(self, mock_delay, failure, mid_active_account):
+        from django.db import transaction as django_transaction
+        with django_transaction.atomic():
+            process_retry_result(failure, success=False)
+
+        mock_delay.assert_not_called()
+
+    @patch("core.tasks.notifications.send_recovery_confirmation.delay")
+    def test_not_dispatched_when_already_recovered(self, mock_delay, failure, mid_active_account):
+        Subscriber.objects.filter(id=failure.subscriber_id).update(status=STATUS_RECOVERED)
+        failure.subscriber.refresh_from_db()
+
+        from django.db import transaction as django_transaction
+        with django_transaction.atomic():
+            process_retry_result(failure, success=True)
+
+        mock_delay.assert_not_called()
+
+    @patch("core.tasks.notifications.send_recovery_confirmation.delay")
+    @patch("core.services.recovery._safe_transition", return_value=False)
+    def test_not_dispatched_when_transition_blocked(self, mock_transition, mock_delay,
+                                                     failure, mid_active_account):
+        from django.db import transaction as django_transaction
+        with django_transaction.atomic():
+            process_retry_result(failure, success=True)
+
+        mock_delay.assert_not_called()
+
+    @patch("core.tasks.notifications.send_recovery_confirmation.delay")
+    def test_idempotent_per_failure(self, mock_delay, failure, mid_active_account):
+        """Second process_retry_result call after recovery does not re-dispatch.
+
+        Idempotency mechanism: after the first call the subscriber is in
+        STATUS_RECOVERED, so the second call's `_safe_transition(active→recovered)`
+        returns False, `transitioned` stays False, and the on_commit hook is
+        never registered. This test pins both the dispatch count and the
+        underlying FSM precondition.
+        """
+        from django.db import transaction as django_transaction
+        with django_transaction.atomic():
+            process_retry_result(failure, success=True)
+
+        failure.subscriber.refresh_from_db()
+        assert failure.subscriber.status == STATUS_RECOVERED, (
+            "first call must leave subscriber in RECOVERED for the FSM-based "
+            "idempotency guard on the second call to engage"
+        )
+
+        # Second call: subscriber is already RECOVERED → transition returns False
+        with django_transaction.atomic():
+            process_retry_result(failure, success=True)
+
+        assert mock_delay.call_count == 1
+
+    @patch("core.tasks.notifications.send_recovery_confirmation.delay")
+    def test_dispatched_after_commit(self, mock_delay, failure, mid_active_account):
+        """on_commit dispatch must NOT fire if surrounding atomic block rolls back."""
+        from django.db import transaction as django_transaction
+        try:
+            with django_transaction.atomic():
+                process_retry_result(failure, success=True)
+                raise RuntimeError("force rollback")
+        except RuntimeError:
+            pass
+        mock_delay.assert_not_called()

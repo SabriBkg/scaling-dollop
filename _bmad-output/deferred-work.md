@@ -116,3 +116,15 @@
 
 - iframe `sandbox=""` in `NotificationPreview.tsx` blocks the CTA link click — UX consideration. A user trying to verify the link destination cannot click through. Surface URL textually beneath the iframe in a follow-up if user feedback warrants it.
 - `useNotificationPreview` `staleTime: 5min` does not invalidate on `complete_profile` flow — if `account.company_name` changes, the preview shows stale text for up to 5 minutes. Cross-story fix: invalidate `["notification-preview"]` from the profile-completion handler (or any future endpoint that mutates `company_name`).
+
+## Deferred from: code review of story-4-3-final-notice-recovery-confirmation-emails (2026-04-27)
+
+- `_record_failure` swallows all exceptions during DLL / NotificationLog writes (`backend/core/tasks/notifications.py`) — silent failures invisible to alerting. Pre-existing pattern from 4.1; address as a notifications-resilience epic.
+- `customer_update_url` accepts `javascript:` and other dangerous URL schemes (`backend/core/services/email.py:223`) — `html.escape(quote=True)` does not block scheme abuse on `<a href>`. Should be validated at the account-update boundary. Pre-existing across all CTA-bearing email types.
+- `resend.Emails.send` has no client-side timeout (`backend/core/services/email.py:296-300, 352-357, 402-407`) — worker stall past Celery visibility timeout causes redelivery and amplifies the duplicate-send race. Pre-existing across all three send paths.
+- `NotificationLog.email_type` has no `choices=` / CHECK constraint (`backend/core/models/notification.py`) — typos silently create new categories. Pre-existing from 4.1 schema.
+- `is_last_retry = (retry_count + 1) == retry_cap` uses `==`, not `>=` (`backend/core/services/recovery.py:204`) — final notice never fires if `retry_count` somehow exceeds `retry_cap`. Data-corruption edge case.
+- `retry_cap` change between retries (admin edits the rule mid-flight) skews `is_last_retry` (`backend/core/services/recovery.py:204`) — final notice fires too early or never for in-flight failures. Out of scope for 4.3.
+- `_safe_transition` raises non-`TransitionNotAllowed` exception (DB error) after `retry_count` is saved (`backend/core/services/recovery.py`) — `retry_count` persisted but FSM stuck. Broader DB-resilience concern.
+- `NotificationLog.objects.create` raises non-`IntegrityError` after Resend already sent (`backend/core/tasks/notifications.py:113-121`) — audit divergence (sent email but no DB row). Broader DB-resilience concern.
+- `resend.Emails.send` may return a dict missing `"id"` key or raise an SDK-specific exception class (`backend/core/services/email.py`) — current `dict["id"]` access and broad `except Exception` work but are SDK-contract assumptions.

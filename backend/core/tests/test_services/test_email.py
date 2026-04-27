@@ -3,10 +3,17 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 from core.services.email import (
+    SkipNotification,
+    _build_final_notice_html_body,
+    _build_final_notice_subject,
     _build_from_field,
-    _build_subject,
     _build_html_body,
+    _build_recovery_confirmation_html_body,
+    _build_recovery_confirmation_subject,
+    _build_subject,
+    send_final_notice_email,
     send_notification_email,
+    send_recovery_confirmation_email,
     CARD_EXPIRED_CODES,
 )
 
@@ -333,3 +340,269 @@ class TestSendNotificationEmailRoundTrip:
         sent_subject = mock_send.call_args[0][0]["subject"]
         # Professional default subject
         assert "Action needed" in sent_subject
+
+
+# ---------------------------------------------------------------------------
+# Story 4.3 — final notice & recovery confirmation
+# ---------------------------------------------------------------------------
+
+
+class TestFinalNoticeSubject:
+    @pytest.mark.parametrize("tone,expected_phrase", [
+        ("professional", "Final attempt"),
+        ("friendly", "last try"),
+        ("minimal", "Final attempt"),
+    ])
+    def test_final_notice_subject_uses_tone(self, tone, expected_phrase):
+        subject = _build_final_notice_subject("Acme", tone=tone)
+        assert expected_phrase in subject
+        assert "Acme" in subject
+
+    def test_final_notice_subject_strips_crlf(self):
+        subject = _build_final_notice_subject("Acme\r\nBcc: attacker@evil.com", tone="professional")
+        assert "\r" not in subject
+        assert "\n" not in subject
+
+    def test_final_notice_unknown_tone_falls_back(self):
+        subject = _build_final_notice_subject("Acme", tone="shouting")
+        assert "Final attempt" in subject
+
+    def test_final_notice_empty_tone_falls_back(self):
+        subject = _build_final_notice_subject("Acme", tone="")
+        assert "Final attempt" in subject
+
+
+class TestFinalNoticeBody:
+    @pytest.mark.parametrize("tone", ["professional", "friendly", "minimal"])
+    def test_final_notice_body_contains_canonical_message(self, tone):
+        """Every tone's body must voice the substance of "last attempt → paused"."""
+        html = _build_final_notice_html_body(
+            "Acme", "https://example.com/update", "https://optout.com",
+            tone=tone,
+        )
+        lower = html.lower()
+        assert "last attempt" in lower or "final attempt" in lower or "last try" in lower
+        assert "paused" in lower
+
+    @pytest.mark.parametrize("tone", ["professional", "friendly", "minimal"])
+    def test_final_notice_html_escapes_company_name(self, tone):
+        html = _build_final_notice_html_body(
+            "<script>alert(1)</script>", "https://example.com/update", "https://optout.com",
+            tone=tone,
+        )
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;" in html
+
+    @pytest.mark.parametrize("tone", ["professional", "friendly", "minimal"])
+    def test_final_notice_footer_single_escapes_company(self, tone):
+        """Footer must single-escape company name (no &amp;amp; double-encoding)."""
+        html = _build_final_notice_html_body(
+            "Tom & Jerry, Inc.", "https://example.com/update", "https://optout.com",
+            tone=tone,
+        )
+        assert "Tom &amp; Jerry, Inc." in html
+        assert "&amp;amp;" not in html
+
+    @pytest.mark.parametrize("tone", ["professional", "friendly", "minimal"])
+    def test_final_notice_contains_cta_and_opt_out(self, tone):
+        html = _build_final_notice_html_body(
+            "Acme", "https://billing.example.com", "https://optout.com",
+            tone=tone,
+        )
+        assert "https://billing.example.com" in html
+        assert "https://optout.com" in html
+
+    def test_final_notice_minimal_has_no_greeting(self):
+        html = _build_final_notice_html_body(
+            "Acme", "https://example.com/update", "https://optout.com",
+            tone="minimal",
+        )
+        assert "Hello," not in html
+        assert "Hi there" not in html
+
+
+class TestSendFinalNoticeEmail:
+    def _make_mocks(self, customer_update_url="https://example.com/update"):
+        subscriber = MagicMock()
+        subscriber.email = "subscriber@example.com"
+        subscriber.id = 1
+
+        failure = MagicMock()
+        failure.id = 42
+
+        account = MagicMock()
+        account.company_name = "TestCo"
+        account.customer_update_url = customer_update_url
+        account.notification_tone = "professional"
+        return subscriber, failure, account
+
+    @patch("core.services.email.resend.Emails.send")
+    def test_success_returns_message_id(self, mock_send):
+        mock_send.return_value = {"id": "msg_fn_1"}
+        subscriber, failure, account = self._make_mocks()
+
+        msg_id = send_final_notice_email(subscriber, failure, account)
+
+        assert msg_id == "msg_fn_1"
+        call_args = mock_send.call_args[0][0]
+        assert "TestCo via SafeNet" in call_args["from"]
+        assert call_args["to"] == ["subscriber@example.com"]
+        assert "Final attempt" in call_args["subject"]
+
+    @patch("core.services.email.resend.Emails.send")
+    def test_skip_when_no_customer_update_url(self, mock_send):
+        subscriber, failure, account = self._make_mocks(customer_update_url="")
+
+        with pytest.raises(SkipNotification):
+            send_final_notice_email(subscriber, failure, account)
+        mock_send.assert_not_called()
+
+    @patch("core.services.email.resend.Emails.send")
+    def test_skip_when_blank_email(self, mock_send):
+        subscriber, failure, account = self._make_mocks()
+        subscriber.email = ""
+
+        with pytest.raises(SkipNotification):
+            send_final_notice_email(subscriber, failure, account)
+        mock_send.assert_not_called()
+
+
+class TestRecoveryConfirmationSubject:
+    @pytest.mark.parametrize("tone,expected_phrase", [
+        ("professional", "Payment confirmed"),
+        ("friendly", "All sorted"),
+        ("minimal", "Payment confirmed"),
+    ])
+    def test_recovery_confirmation_subject_uses_tone(self, tone, expected_phrase):
+        subject = _build_recovery_confirmation_subject("Acme", tone=tone)
+        assert expected_phrase in subject
+        assert "Acme" in subject
+
+    def test_recovery_confirmation_subject_strips_crlf(self):
+        subject = _build_recovery_confirmation_subject(
+            "Acme\r\nBcc: attacker@evil.com", tone="professional",
+        )
+        assert "\r" not in subject
+        assert "\n" not in subject
+
+
+class TestRecoveryConfirmationBody:
+    @pytest.mark.parametrize("tone", ["professional", "friendly", "minimal"])
+    def test_recovery_confirmation_body_max_two_paragraphs(self, tone):
+        """UX line 771: brief — two paragraphs maximum across every tone.
+
+        Cap is enforced by construction: `body_paragraphs` returns a fixed-length
+        list literal per tone. We assert against the template directly because
+        the greeting renders with the same `color:#333` style, so an HTML-only
+        regex would conflate body and greeting.
+        """
+        from core.services.email_templates import get_recovery_confirmation_template
+
+        template = get_recovery_confirmation_template(tone)
+        paragraphs = template.body_paragraphs("Acme")
+        assert len(paragraphs) <= 2, (
+            f"tone={tone} produced {len(paragraphs)} body paragraphs; cap is 2"
+        )
+
+    @pytest.mark.parametrize("tone", ["professional", "friendly", "minimal"])
+    def test_recovery_confirmation_no_cta_button(self, tone):
+        """The recovery confirmation must NOT contain the CTA button styling/href."""
+        html = _build_recovery_confirmation_html_body(
+            "Acme", "https://optout.com", tone=tone,
+        )
+        # CTA button color from _build_html_body:116 — must not appear here
+        assert "background:#2563eb" not in html
+        # Only one <a> link should exist (the opt-out)
+        import re
+        anchors = re.findall(r"<a\s+href=", html)
+        assert len(anchors) == 1
+
+    @pytest.mark.parametrize("tone", ["professional", "friendly", "minimal"])
+    def test_recovery_confirmation_html_escapes_company_name(self, tone):
+        html = _build_recovery_confirmation_html_body(
+            "<script>alert(1)</script>", "https://optout.com", tone=tone,
+        )
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;" in html
+
+    @pytest.mark.parametrize("tone", ["professional", "friendly", "minimal"])
+    def test_recovery_confirmation_footer_single_escapes_company(self, tone):
+        html = _build_recovery_confirmation_html_body(
+            "Tom & Jerry, Inc.", "https://optout.com", tone=tone,
+        )
+        assert "Tom &amp; Jerry, Inc." in html
+        assert "&amp;amp;" not in html
+
+    def test_recovery_confirmation_minimal_has_one_paragraph(self):
+        import re
+        html = _build_recovery_confirmation_html_body(
+            "Acme", "https://optout.com", tone="minimal",
+        )
+        body_paragraph_count = len(re.findall(r'<p style="color:#333', html))
+        assert body_paragraph_count == 1
+
+
+class TestSendRecoveryConfirmationEmail:
+    def _make_mocks(self, customer_update_url="https://example.com/update"):
+        subscriber = MagicMock()
+        subscriber.email = "subscriber@example.com"
+        subscriber.id = 1
+
+        failure = MagicMock()
+        failure.id = 99
+
+        account = MagicMock()
+        account.company_name = "TestCo"
+        account.customer_update_url = customer_update_url
+        account.notification_tone = "professional"
+        return subscriber, failure, account
+
+    @patch("core.services.email.resend.Emails.send")
+    def test_success_returns_message_id(self, mock_send):
+        mock_send.return_value = {"id": "msg_rc_1"}
+        subscriber, failure, account = self._make_mocks()
+
+        msg_id = send_recovery_confirmation_email(subscriber, failure, account)
+
+        assert msg_id == "msg_rc_1"
+        call_args = mock_send.call_args[0][0]
+        assert "TestCo via SafeNet" in call_args["from"]
+        assert call_args["to"] == ["subscriber@example.com"]
+        assert "Payment confirmed" in call_args["subject"]
+
+    @patch("core.services.email.resend.Emails.send")
+    def test_sends_without_customer_update_url(self, mock_send):
+        """Recovery confirmation has no CTA — customer_update_url is irrelevant."""
+        mock_send.return_value = {"id": "msg_rc_2"}
+        subscriber, failure, account = self._make_mocks(customer_update_url="")
+
+        msg_id = send_recovery_confirmation_email(subscriber, failure, account)
+
+        assert msg_id == "msg_rc_2"
+
+    @patch("core.services.email.resend.Emails.send")
+    def test_skip_when_blank_email(self, mock_send):
+        subscriber, failure, account = self._make_mocks()
+        subscriber.email = ""
+
+        with pytest.raises(SkipNotification):
+            send_recovery_confirmation_email(subscriber, failure, account)
+        mock_send.assert_not_called()
+
+
+class TestEmailShellInvariant:
+    """Refactor guard: extracting `_render_email_shell` must not change failure-notice rendering."""
+
+    def test_shell_extraction_preserves_outer_chrome(self):
+        """The DOCTYPE / table chrome must still appear exactly once in the failure-notice render."""
+        html_body = _build_html_body(
+            "Acme", "insufficient_funds",
+            "https://example.com", "https://optout.com",
+            tone="professional",
+        )
+        # Outer chrome contracts.
+        assert html_body.startswith("<!DOCTYPE html>\n<html>")
+        assert html_body.endswith("</html>")
+        # Body table styling — single-source-of-truth check on the shell.
+        assert 'max-width:600px' in html_body
+        assert html_body.count('<!DOCTYPE html>') == 1

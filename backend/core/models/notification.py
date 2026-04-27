@@ -37,6 +37,19 @@ class NotificationLog(TenantScopedModel):
 
     class Meta:
         db_table = "core_notification_log"
+        constraints = [
+            # Partial unique on status='sent' — multiple suppressed/failed rows
+            # for the same (failure, email_type) remain valid (gate-fail rows
+            # repeat across polling cycles per Story 4.1 design). Story 4.3
+            # Task 6: the source of truth for "sent at most once per
+            # (failure, email_type)" — closes the TOCTOU gap left by the
+            # gate-check fast path in tasks/notifications.py.
+            models.UniqueConstraint(
+                fields=["failure", "email_type"],
+                condition=models.Q(status="sent"),
+                name="unique_sent_notification_per_failure_email_type",
+            ),
+        ]
 
 
 class NotificationOptOut(TenantScopedModel):

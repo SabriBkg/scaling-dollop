@@ -10,6 +10,7 @@ All ORM work happens here in core/services/.
 import logging
 from datetime import timedelta
 
+from django.db import transaction
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
@@ -197,6 +198,58 @@ def schedule_retry(failure, decision: RecoveryDecision):
         account=account,
     )
 
+    # Final notice (FR24): the dispatch fires when the retry being scheduled is
+    # the LAST one permitted by the rule. retry_count is the count BEFORE this
+    # retry executes; the upcoming retry is retry_count + 1.
+    is_last_retry = (failure.retry_count + 1) == decision.retry_cap
+    if is_last_retry and decision.retry_cap > 0:
+        # Status guard: if the subscriber has drifted out of ACTIVE between the
+        # cap-exhaustion branch above and here, suppress the final notice — the
+        # FSM has already moved past active and the email would mislead.
+        if subscriber.status != STATUS_ACTIVE:
+            logger.info(
+                "[schedule_retry] Skipping final notice — subscriber %s is %s",
+                subscriber.id, subscriber.status,
+            )
+            return
+
+        # Idempotency guard: if a final_notice has already been logged for this
+        # failure (sent or suppressed_duplicate), do not re-dispatch. Concurrent
+        # operators / replay / parallel polling can otherwise register two
+        # on_commit lambdas → two Resend.send calls before the unique
+        # constraint fires.
+        from core.models.notification import NotificationLog
+        if NotificationLog.objects.filter(
+            failure=failure,
+            email_type="final_notice",
+            status__in=["sent", "suppressed"],
+        ).exists():
+            logger.info(
+                "[schedule_retry] Skipping final notice — already dispatched for failure %s",
+                failure.id,
+            )
+            return
+
+        from core.tasks.notifications import send_final_notice
+        failure_id = failure.id
+        transaction.on_commit(
+            lambda fid=failure_id: send_final_notice.delay(fid)
+        )
+
+        write_audit_event(
+            subscriber=str(subscriber.id),
+            actor="engine",
+            action="final_notice_dispatched",
+            outcome="success",
+            metadata={
+                "decline_code": decision.decline_code,
+                "retry_number": failure.retry_count + 1,
+                "retry_cap": decision.retry_cap,
+                "failure_id": str(failure.id),
+            },
+            account=account,
+        )
+
 
 def process_retry_result(failure, success: bool):
     """
@@ -217,8 +270,9 @@ def process_retry_result(failure, success: bool):
         failure.next_retry_at = None
         failure.save(update_fields=["retry_count", "last_retry_at", "next_retry_at"])
 
+        transitioned = False
         if subscriber.status == STATUS_ACTIVE:
-            _safe_transition(subscriber, "recover", account)
+            transitioned = _safe_transition(subscriber, "recover", account)
 
         write_audit_event(
             subscriber=str(subscriber.id),
@@ -233,6 +287,19 @@ def process_retry_result(failure, success: bool):
             },
             account=account,
         )
+
+        # Recovery confirmation (FR25): dispatch only if the FSM transition
+        # actually occurred. If the subscriber was already non-ACTIVE (status
+        # drift, parallel task, manual operator action), the transition
+        # returns False and we do not send a confirmation.
+        # 5-minute SLA per FR25; no countdown= needed — Celery worker picks
+        # up immediately and the Resend send completes well under 5 min.
+        if transitioned:
+            from core.tasks.notifications import send_recovery_confirmation
+            failure_id = failure.id
+            transaction.on_commit(
+                lambda fid=failure_id: send_recovery_confirmation.delay(fid)
+            )
     else:
         failure.save(update_fields=["retry_count", "last_retry_at"])
 

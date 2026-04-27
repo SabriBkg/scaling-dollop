@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import patch
 
 from cryptography.fernet import Fernet
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from core.models.account import StripeConnection, TIER_MID
@@ -100,6 +100,86 @@ class TestNotificationLog:
             status="sent",
         )
         assert log.metadata == {}
+
+    def test_unique_sent_per_failure_constraint(
+        self, mid_account, subscriber, failure
+    ):
+        """Two sent rows for the same (failure, email_type) violate the constraint."""
+        NotificationLog.objects.create(
+            account=mid_account,
+            subscriber=subscriber,
+            failure=failure,
+            email_type="failure_notice",
+            status="sent",
+        )
+        with pytest.raises(
+            IntegrityError,
+            match="unique_sent_notification_per_failure_email_type",
+        ):
+            with transaction.atomic():
+                NotificationLog.objects.create(
+                    account=mid_account,
+                    subscriber=subscriber,
+                    failure=failure,
+                    email_type="failure_notice",
+                    status="sent",
+                )
+
+    def test_constraint_allows_multiple_suppressed_or_failed(
+        self, mid_account, subscriber, failure
+    ):
+        """Suppressed/failed rows for the same (failure, email_type) are allowed."""
+        NotificationLog.objects.create(
+            account=mid_account,
+            subscriber=subscriber,
+            failure=failure,
+            email_type="failure_notice",
+            status="suppressed",
+        )
+        NotificationLog.objects.create(
+            account=mid_account,
+            subscriber=subscriber,
+            failure=failure,
+            email_type="failure_notice",
+            status="suppressed",
+        )
+        NotificationLog.objects.create(
+            account=mid_account,
+            subscriber=subscriber,
+            failure=failure,
+            email_type="failure_notice",
+            status="failed",
+        )
+        assert NotificationLog.objects.filter(
+            failure=failure, email_type="failure_notice"
+        ).count() == 3
+
+    def test_unique_constraint_does_not_apply_across_email_types(
+        self, mid_account, subscriber, failure
+    ):
+        """Different email_types may each have one sent row for the same failure."""
+        NotificationLog.objects.create(
+            account=mid_account,
+            subscriber=subscriber,
+            failure=failure,
+            email_type="failure_notice",
+            status="sent",
+        )
+        NotificationLog.objects.create(
+            account=mid_account,
+            subscriber=subscriber,
+            failure=failure,
+            email_type="final_notice",
+            status="sent",
+        )
+        NotificationLog.objects.create(
+            account=mid_account,
+            subscriber=subscriber,
+            failure=failure,
+            email_type="recovery_confirmation",
+            status="sent",
+        )
+        assert NotificationLog.objects.filter(failure=failure, status="sent").count() == 3
 
 
 @pytest.mark.django_db
