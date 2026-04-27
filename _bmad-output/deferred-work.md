@@ -128,3 +128,53 @@
 - `_safe_transition` raises non-`TransitionNotAllowed` exception (DB error) after `retry_count` is saved (`backend/core/services/recovery.py`) — `retry_count` persisted but FSM stuck. Broader DB-resilience concern.
 - `NotificationLog.objects.create` raises non-`IntegrityError` after Resend already sent (`backend/core/tasks/notifications.py:113-121`) — audit divergence (sent email but no DB row). Broader DB-resilience concern.
 - `resend.Emails.send` may return a dict missing `"id"` key or raise an SDK-specific exception class (`backend/core/services/email.py`) — current `dict["id"]` access and broad `except Exception` work but are SDK-contract assumptions.
+
+## Deferred from: code review of 4-4-opt-out-mechanism-notification-suppression (2026-04-27)
+
+- No token rotation / revocation primitive — `decode_optout_token(max_age=None)`, no per-subscriber DB nonce. Explicit FR26 / GDPR design choice; revisit if a "permanent suppression" abuse incident appears.
+- `@csrf_exempt` POST without nonce / origin check — explicit spec design ("signed token IS the proof-of-intent"). Re-evaluate if `RFC 8058 List-Unsubscribe-Post` header support is added.
+- Account-ID enumeration if `SECRET_KEY` leaks — stateless-token tradeoff. Mitigated only by `SECRET_KEY` rotation breaking all opt-out URLs.
+- Unicode NFKC email canonicalization — `str.lower()` is locale-naive across signer (`optout_token.py:27`) and gate-4 lookup (`notifications.py:64`). Project-wide; address holistically.
+- `NotificationOptOut(subscriber_email, account)` unique constraint is case-sensitive but gate-4 lookup is `__iexact` — operator-console / future-API rows with mixed case could bypass the duplicate guard. Story 4.1 model-layer concern.
+- `SAFENET_BASE_URL` scheme validation at startup — no fail-loud check that env var is `https://` (or `http://localhost`). Defends against misconfig planting `javascript:` URIs in outgoing emails.
+- Max email length enforcement at sign time — only matters with `SECRET_KEY` leak; sign-time validation matching `NotificationOptOut.subscriber_email.max_length`.
+- Raw `subscriber_email` in `AuditLog.metadata` — PII travels with audit logs to Sentry/SIEM exports. Project-wide audit-logging redaction policy decision.
+- `Subscriber.first()` non-deterministic if multiple subscribers share an email under one account — audit row's `subscriber_id` is arbitrary. Project-wide subscriber-model concern.
+- `_render_email_shell` `_`-prefixed import across modules (`core.services.email` → `core.views.optout`) — explicitly deferred per Story 4.4 spec Task 2.6. Promote to public if a third public-HTML page is added (Story 4.5 password reset is the trigger).
+- `int(account_id)` raises uncaught at sign time for non-numeric input — defensive only; today every caller passes `account.id` (`BigAutoField`). No current risk path.
+
+## Deferred from: pre-existing test failures on main (surfaced 2026-04-27)
+
+10 backend tests fail on bare `main` (independent of Story 4.4). Captured here so the regression baseline doesn't drift further. Each needs a root-cause fix in a dedicated patch story; do not silence by skipping.
+
+**`backend/core/tests/test_api/test_billing_webhook.py`** (8 failures — all return 500/400 instead of expected status; suggests a webhook-handler import error or stripe-mock setup drift):
+- `TestStripeBillingWebhook::test_checkout_completed_upgrades_account` — 500 vs expected 200
+- `TestStripeBillingWebhook::test_checkout_completed_writes_audit` — audit row None
+- `TestStripeBillingWebhook::test_subscription_deleted_downgrades` — 500 vs expected 200
+- `TestStripeBillingWebhook::test_unhandled_event_returns_200` — 500 vs expected 200
+- `TestStripeBillingWebhook::test_invalid_signature_returns_400` — 500 vs expected 400
+- `TestStripeBillingWebhook::test_idempotent_upgrade` — 500 vs expected 200
+- `TestCreateCheckoutSession::test_creates_session` — 400 vs expected 200
+- `TestCreateCheckoutSession::test_stripe_error_returns_500` — 400 vs expected 500
+
+**`backend/core/tests/test_api/test_dashboard.py`** (1 failure — schema/migration drift):
+- `TestDashboardSummaryEndpoint::test_attention_items_isolated_by_tenant` — `IntegrityError: null value in column "recommended_retry_cap" of relation "core_pending_action" violates not-null constraint`. Likely a migration that added NOT NULL without a default, OR a `PendingAction` factory that no longer populates the field.
+
+**`backend/core/tests/test_tasks/test_polling.py`** (1 failure):
+- `TestPollAccountFailures::test_missed_cycle_alert` — assertion `None is not None`; alert path returns None instead of writing the expected log/audit row.
+
+**Verified scope:** Story 4.4-scoped tests (`test_optout.py`, `test_optout_e2e.py`, `test_optout_token.py`, `test_email.py`, `test_notifications.py`) all pass. These 10 are unrelated to the opt-out work.
+
+## Deferred from: code review of story-4-5 (2026-04-27)
+
+- **JWT refresh-token revocation on password change** — `simplejwt` does not auto-revoke outstanding refresh tokens when a user's password changes; existing tokens live until natural 7-day expiry. Spec explicitly defers; documented in Story 4.5 Completion Notes. Wire `BlacklistedToken` + signal in a follow-up auth-hardening story.
+- **Active session invalidation on password change** — Same category as JWT defer; not addressed at MVP. Currently no session bust on `set_password`.
+- **Constant-time response on `password-reset/`** — Registered-email branch makes outbound Resend call (~hundreds of ms); unregistered branch returns immediately (~5ms). Resend latency is a known timing channel; spec accepts at MVP. Future fix: fixed-latency floor or move dispatch to Celery.
+- **Behavioral token-expiry test (freezegun)** — Currently a structural-only assertion (`PASSWORD_RESET_TIMEOUT == 3600`); spec sanctions this when `freezegun` isn't installed. Add `freezegun` to dev dependencies and assert real expiry behavior.
+- **Audit `email_hash` is unsalted truncated SHA-256 (16 hex chars)** — Pre-image attack across known mailing lists is feasible. Spec accepted format for operator-recomputability. Consider keyed HMAC with a server-side secret if PII threat model tightens (NFR-D2 / NFR-S5).
+- **Email subject not localized** — Hardcoded English `"Reset your SafeNet password"` in `_build_password_reset_subject`. Out of MVP scope; revisit when i18n pass arrives.
+- **`opt_out_url` with empty `subscriber.email`** — Cross-cutting concern in subscriber notification flow; if `subscriber.email == ""` the signed token represents "any subscriber with empty email at this account" — silent identity collision. Not introduced by Story 4.5; carry-over from 4.4 surface area.
+- **Throttle backend persistence across restarts** — Cache flush or process restart resets throttle buckets. Project-wide deployment concern (LocMem vs Redis); audit and harden when deploying to multi-instance prod.
+- **`PASSWORD_RESET_TIMEOUT` ↔ frontend "1 hour" copy drift** — Email body hardcodes "This link expires in 1 hour." Drift if `PASSWORD_RESET_TIMEOUT` ever changes. Either derive copy from settings or add an equality test.
+- **Tests do not assert `Content-Length` byte-equality between registered vs unknown branches** — Stronger byte-identical guarantee than spec requires for the no-enumeration contract; defer until threat model tightens.
+- **Audit metadata IP/UA forensics** — `password_reset_requested` / `password_reset_completed` audit rows record only `user_id` + `email_hash`. SOC investigation of account-takeover would benefit from source IP + User-Agent. _Reason: project-wide audit enhancement; not story-specific to 4.5._

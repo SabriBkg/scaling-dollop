@@ -5,6 +5,8 @@ export const ROUTES = {
   REGISTER: "/register",
   STRIPE_CALLBACK: "/register/callback",
   REGISTER_COMPLETE: "/register/complete",
+  FORGOT_PASSWORD: "/forgot-password",
+  RESET_PASSWORD: "/reset-password",
   DASHBOARD: "/dashboard",
   SETTINGS: "/settings",
   REVIEW_QUEUE: "/review-queue",

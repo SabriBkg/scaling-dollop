@@ -1,5 +1,9 @@
+from rest_framework.exceptions import Throttled
 from rest_framework.views import exception_handler
 from rest_framework.response import Response
+
+
+_THROTTLED_MESSAGE = "Too many password reset requests. Try again later."
 
 
 def custom_exception_handler(exc, context):
@@ -10,10 +14,15 @@ def custom_exception_handler(exc, context):
     response = exception_handler(exc, context)
 
     if response is not None:
+        code = _get_error_code(exc)
+        if isinstance(exc, Throttled):
+            message = _THROTTLED_MESSAGE
+        else:
+            message = _get_error_message(response.data)
         error_data = {
             "error": {
-                "code": _get_error_code(exc),
-                "message": _get_error_message(response.data),
+                "code": code,
+                "message": message,
                 "field": _get_error_field(response.data),
             }
         }
@@ -28,6 +37,7 @@ def _get_error_code(exc) -> str:
         NotAuthenticated: "UNAUTHENTICATED",
         PermissionDenied: "FORBIDDEN",
         NotFound: "NOT_FOUND",
+        Throttled: "RATE_LIMITED",
     }
     return mapping.get(type(exc), "VALIDATION_ERROR")
 

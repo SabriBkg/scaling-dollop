@@ -21,7 +21,7 @@ def write_audit_event(
 
     Args:
         subscriber: Subscriber identifier string (None for account-level events)
-        actor: One of "engine", "operator", "client"
+        actor: One of "engine", "operator", "client", "subscriber"
         action: snake_case verb describing what happened, e.g. "retry_scheduled"
         outcome: "success" | "failed" | "skipped"
         metadata: Additional context dict (optional)

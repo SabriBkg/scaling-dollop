@@ -104,6 +104,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "auth": "5/min",
         "profile": "3/min",
+        "password_reset": "3/hour",  # Story 4.5 — 3 requests/email/hour
     },
 }
 
@@ -142,6 +143,19 @@ SPECTACULAR_SETTINGS = {
 # Resend (email notifications)
 RESEND_API_KEY = env("RESEND_API_KEY", default="")
 SAFENET_SENDING_DOMAIN = env("SAFENET_SENDING_DOMAIN", default="payments.safenet.app")
+SAFENET_BASE_URL = env("SAFENET_BASE_URL", default="https://app.safenet.app")
+
+# Password reset (Story 4.5) — 1-hour expiry overrides Django default 3-day.
+PASSWORD_RESET_TIMEOUT = 60 * 60  # seconds — DO NOT raise without a security review
+SAFENET_FRONTEND_URL = env("SAFENET_FRONTEND_URL", default="https://app.safenet.app")
+assert SAFENET_FRONTEND_URL.startswith(("http://", "https://")), (
+    "SAFENET_FRONTEND_URL must include scheme (http:// or https://)"
+)
+if not DEBUG and ("localhost" in SAFENET_FRONTEND_URL or "127.0.0.1" in SAFENET_FRONTEND_URL):
+    raise RuntimeError(
+        "SAFENET_FRONTEND_URL points at localhost in a non-DEBUG environment — "
+        "set the production frontend URL before deploying."
+    )
 
 # Sentry
 _sentry_dsn = env("SENTRY_DSN", default="")

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { setTokens } from "@/lib/auth";
 import { ROUTES } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
@@ -9,8 +10,10 @@ import { Input } from "@/components/ui/input";
 import { ConnectStripe } from "@/components/onboarding/ConnectStripe";
 import api from "@/lib/api";
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const showResetSuccess = searchParams.get("reset") === "success";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +48,12 @@ export default function LoginPage() {
       <div className="w-full max-w-sm px-6 py-12">
         <h1 className="mb-8 text-2xl font-bold text-center text-text-primary">Sign in to SafeNet</h1>
 
+        {showResetSuccess && (
+          <p className="mb-4 text-sm text-green-600 text-center" role="status">
+            Password updated — sign in below.
+          </p>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <Input
             type="email"
@@ -66,7 +75,9 @@ export default function LoginPage() {
               aria-label="Password"
             />
             <p className="mt-1 text-right text-xs text-text-tertiary">
-              <span className="cursor-not-allowed opacity-50">Forgot password?</span>
+              <Link href={ROUTES.FORGOT_PASSWORD} className="hover:underline">
+                Forgot password?
+              </Link>
             </p>
           </div>
 
@@ -94,5 +105,29 @@ export default function LoginPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+function LoginSkeleton() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-bg-base">
+      <div className="w-full max-w-sm px-6 py-12">
+        <div className="mb-8 h-7 w-3/4 mx-auto rounded bg-bg-elevated" />
+        <div className="space-y-4">
+          <div className="h-10 w-full rounded bg-bg-elevated" />
+          <div className="h-10 w-full rounded bg-bg-elevated" />
+          <div className="h-10 w-full rounded bg-bg-elevated" />
+        </div>
+      </div>
+    </main>
+  );
+}
+
+export default function LoginPage() {
+  // useSearchParams() requires a Suspense boundary in the App Router.
+  return (
+    <Suspense fallback={<LoginSkeleton />}>
+      <LoginPageInner />
+    </Suspense>
   );
 }

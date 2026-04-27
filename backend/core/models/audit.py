@@ -7,11 +7,13 @@ from core.models.base import TenantManager
 ACTOR_ENGINE = "engine"
 ACTOR_OPERATOR = "operator"
 ACTOR_CLIENT = "client"
+ACTOR_SUBSCRIBER = "subscriber"  # Story 4.4 — end-customer-side opt-out actor
 
 ACTOR_CHOICES = [
     (ACTOR_ENGINE, "Engine"),
     (ACTOR_OPERATOR, "Operator"),
     (ACTOR_CLIENT, "Client"),
+    (ACTOR_SUBSCRIBER, "Subscriber"),
 ]
 
 

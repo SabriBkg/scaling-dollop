@@ -8,6 +8,7 @@ from core.services.email import (
     _build_final_notice_subject,
     _build_from_field,
     _build_html_body,
+    _build_password_reset_html_body,
     _build_recovery_confirmation_html_body,
     _build_recovery_confirmation_subject,
     _build_subject,
@@ -296,6 +297,7 @@ class TestSendNotificationEmailRoundTrip:
         failure.id = 99
 
         account = MagicMock()
+        account.id = 1
         account.company_name = "RoundTripCo"
         account.customer_update_url = "https://example.com/update"
         account.notification_tone = "friendly"
@@ -303,11 +305,18 @@ class TestSendNotificationEmailRoundTrip:
         send_notification_email(subscriber, failure, account)
 
         sent_html = mock_send.call_args[0][0]["html"]
+        # The opt-out URL now contains a signed token (Story 4.4). Assert the
+        # email shape rather than a literal URL: it must use the subscriber's
+        # canonicalized email + the account id.
+        from core.services.optout_token import build_optout_url
         expected_html = _build_html_body(
             company_name="RoundTripCo",
             decline_code="card_expired",
             portal_url="https://example.com/update",
-            opt_out_url="https://app.safenet.app/notifications/opt-out",
+            opt_out_url=build_optout_url(
+                subscriber_email="subscriber@example.com",
+                account_id=1,
+            ),
             tone="friendly",
         )
         assert sent_html == expected_html
@@ -588,6 +597,26 @@ class TestSendRecoveryConfirmationEmail:
         with pytest.raises(SkipNotification):
             send_recovery_confirmation_email(subscriber, failure, account)
         mock_send.assert_not_called()
+
+
+class TestPasswordResetEmailBody:
+    """Story 4.5 — password reset email rendering guards."""
+
+    def test_renders_non_empty_href(self):
+        html_body = _build_password_reset_html_body("https://app.safenet.test/reset-password/u/t")
+        # Defense check: the CTA href must NOT be empty (would open the user's
+        # own inbox on click).
+        assert 'href=""' not in html_body
+        assert 'href="https://app.safenet.test/reset-password/u/t"' in html_body
+
+    def test_rejects_empty_reset_url(self):
+        with pytest.raises(ValueError):
+            _build_password_reset_html_body("")
+
+    def test_contains_greeting_paragraph(self):
+        html_body = _build_password_reset_html_body("https://app.safenet.test/reset-password/u/t")
+        # AC 6: greeting paragraph must precede the explanatory paragraph.
+        assert ">Hi,<" in html_body
 
 
 class TestEmailShellInvariant:

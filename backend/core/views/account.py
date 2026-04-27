@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from core.serializers.account import CompleteProfileSerializer
 from core.services.audit import write_audit_event
+from core.services.optout_token import build_optout_url
 from core.services.tier import get_polling_frequency, is_engine_active
 
 
@@ -280,7 +281,14 @@ def notification_preview(request):
     sample_decline_code = "card_expired"
     company_name = account.company_name or "Your Service"
     portal_url = getattr(account, "customer_update_url", "") or "https://your-app.example.com/billing"
-    opt_out_url = "https://app.safenet.app/notifications/opt-out"
+    # Preview uses a real signed token so the rendered HTML is byte-equivalent
+    # to a real notification. The "preview@example.com" payload is harmless —
+    # if the founder clicks it, the worst case is a NotificationOptOut row for
+    # a non-existent subscriber email under their own account.
+    opt_out_url = build_optout_url(
+        subscriber_email="preview@example.com",
+        account_id=account.id,
+    )
 
     subject = _build_subject(sample_decline_code, company_name, tone)
     html_body = _build_html_body(

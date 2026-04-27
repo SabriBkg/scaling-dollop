@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 // Public routes — no authentication required
-const PUBLIC_PATHS = ["/login", "/register"];
+const PUBLIC_PATHS = ["/login", "/register", "/forgot-password", "/reset-password"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow public paths
-  if (PUBLIC_PATHS.some((path) => pathname.startsWith(path))) {
+  // Allow public paths — exact match or matched as a path prefix (with `/`)
+  // so e.g. `/forgot-password-evil` is not treated as `/forgot-password`.
+  if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(path + "/"))) {
     return NextResponse.next();
   }
 
@@ -35,6 +36,6 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|login|register).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|login|register|forgot-password|reset-password).*)",
   ],
 };

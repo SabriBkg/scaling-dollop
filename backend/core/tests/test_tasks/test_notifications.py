@@ -518,3 +518,141 @@ class TestSendRecoveryConfirmation:
     def test_nonexistent_failure_handled(self, mock_send):
         send_recovery_confirmation(999999)
         mock_send.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Story 4.4 — opt-out gate suppression: tenant scoping + canonicalization
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestOptOutCanonicalEmailSuppression:
+    """Locks in the canonicalization contract between optout_token (lower-case
+    + strip at sign time) and notifications.py:64 (iexact + strip at gate time).
+    """
+
+    @patch("core.tasks.notifications.send_notification_email")
+    def test_opt_out_check_uses_canonical_email(self, mock_send, failure):
+        # Pre-create the opt-out row in canonical form (lower, no whitespace).
+        NotificationOptOut.objects.create(
+            account=failure.account,
+            subscriber_email="user@example.com",
+        )
+        # Subscriber email has trailing whitespace + mixed case — gate must
+        # canonicalize and still find the row.
+        sub = failure.subscriber
+        sub.email = "  User@EXAMPLE.com  "
+        sub.save()
+
+        send_failure_notification(failure.id)
+
+        mock_send.assert_not_called()
+        log = NotificationLog.objects.get(status="suppressed")
+        assert log.metadata["reason"] == "opt_out"
+
+
+@pytest.mark.django_db
+class TestNotificationOptOutTenantScoping:
+    """FR27 / AC 6: opt-outs are scoped per (subscriber_email, account_id).
+    A subscriber who opts out from Brand A still receives notifications from
+    Brand B. A SafeNet-wide opt-out would be a cross-tenant data leak.
+    """
+
+    @patch("core.tasks.notifications.send_notification_email")
+    def test_optout_scoped_per_account_pair(self, mock_send, mid_account, failure):
+        from django.contrib.auth.models import User
+        from django.utils import timezone
+
+        # Account A is the existing `mid_account` fixture (= failure.account).
+        # Build a second tenant Account B with the same shared subscriber email.
+        user_b = User.objects.create_user(
+            username="other_user", email="other@example.com", password="x",
+        )
+        account_b = user_b.account
+        account_b.tier = TIER_MID
+        account_b.dpa_accepted_at = timezone.now()
+        account_b.engine_mode = "autopilot"
+        account_b.company_name = "BrandB"
+        account_b.save()
+        StripeConnection(account=account_b, stripe_user_id="acct_b").access_token = "sk_test_b"
+        conn_b = StripeConnection(account=account_b, stripe_user_id="acct_b")
+        conn_b.access_token = "sk_test_b"
+        conn_b.save()
+
+        sub_b = Subscriber.objects.create(
+            account=account_b,
+            stripe_customer_id="cus_b",
+            email="user@example.com",  # same email as account A
+        )
+        failure_b = SubscriberFailure.objects.create(
+            account=account_b,
+            subscriber=sub_b,
+            payment_intent_id="pi_b_notify",
+            decline_code="insufficient_funds",
+            amount_cents=2000,
+            failure_created_at=timezone.now(),
+            classified_action="retry_notify",
+        )
+
+        # User opts out FROM ACCOUNT A only.
+        NotificationOptOut.objects.create(
+            account=mid_account,
+            subscriber_email="user@example.com",
+        )
+
+        mock_send.return_value = "msg_a"
+        send_failure_notification(failure.id)
+        # Account A: suppressed
+        assert NotificationLog.objects.filter(
+            account=mid_account, status="suppressed", metadata__reason="opt_out",
+        ).count() == 1
+
+        mock_send.return_value = "msg_b"
+        send_failure_notification(failure_b.id)
+        # Account B: NOT suppressed by opt-out (Gate 4 must not fire)
+        assert not NotificationLog.objects.filter(
+            account=account_b, status="suppressed", metadata__reason="opt_out",
+        ).exists()
+        # Account B: a sent row was written instead
+        assert NotificationLog.objects.filter(
+            account=account_b, status="sent", failure=failure_b,
+        ).exists()
+
+
+@pytest.mark.django_db
+class TestOptOutSuppressesAllEmailTypes:
+    """AC 4: a single opt-out suppresses ALL three email types for the
+    (subscriber_email, account) pair. Locks in Gate 4's parametric behavior.
+    """
+
+    @pytest.mark.parametrize("task_name,email_type", [
+        ("send_failure_notification", "failure_notice"),
+        ("send_final_notice", "final_notice"),
+        ("send_recovery_confirmation", "recovery_confirmation"),
+    ])
+    def test_optout_suppresses_each_email_type(
+        self, task_name, email_type, failure,
+    ):
+        # Opt out the subscriber once.
+        NotificationOptOut.objects.create(
+            account=failure.account,
+            subscriber_email=failure.subscriber.email,
+        )
+
+        # Resolve the task + the email helper it patches.
+        from core.tasks import notifications as nmod
+        task = getattr(nmod, task_name)
+        send_helper_name = {
+            "send_failure_notification": "send_notification_email",
+            "send_final_notice": "send_final_notice_email",
+            "send_recovery_confirmation": "send_recovery_confirmation_email",
+        }[task_name]
+
+        with patch(f"core.tasks.notifications.{send_helper_name}") as mock_send:
+            task(failure.id)
+
+        mock_send.assert_not_called()
+        log = NotificationLog.objects.get(
+            status="suppressed", email_type=email_type,
+        )
+        assert log.metadata["reason"] == "opt_out"
