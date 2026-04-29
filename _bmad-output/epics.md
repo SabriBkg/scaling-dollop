@@ -195,13 +195,17 @@ A working, fully deployable project skeleton with security patterns, tenant isol
 A founder can connect their Stripe account, immediately see a populated 90-day failure landscape (never an empty state), understand their recoverable revenue, manage their account, and upgrade to Mid tier.
 **FRs covered:** FR1, FR2, FR6, FR7, FR8, FR9, FR29, FR30, FR34, FR35, FR36, FR37, FR39, FR48
 
-### Epic 3: Recovery Engine, Compliance & Customer Status Management
-A Mid-tier client can activate the recovery engine (with DPA gate and mode selection), which then automatically classifies failures, applies code-aware recovery rules, enforces geo-compliance, manages the 4-state customer status machine, detects fraud, and handles card-update triggered retries.
-**FRs covered:** FR3, FR4, FR5, FR10, FR11, FR12, FR13, FR14, FR15, FR16, FR17, FR18, FR19, FR46, FR47
+### Epic 3 (v0): Recovery Engine, Compliance & Customer Status Management — QUARANTINED 2026-04-29
+Preserved on `archive/v0-recovery-engine` branch. Not in v1 product. See `_bmad-output/sprint-change-proposal-2026-04-29.md`.
+**FRs covered (v0):** FR3, FR4, FR5, FR10, FR11, FR12, FR13, FR14, FR15, FR16, FR17, FR18, FR19, FR46, FR47
+
+### Epic 3 (v1): DPA Gate, Failed-Payments Dashboard & Email Actions
+A Mid-tier client signs the DPA, then opens their dashboard to see all current-month failed payments with a recommended dunning email per row. They click to send (single or batch), choose a different email type if they prefer, or mark a failure as resolved. Status transitions are polling-detected and Marc-initiated.
+**FRs covered:** FR3, FR10, FR16, FR17, FR18, FR19, FR52, FR53, FR54, FR55
 
 ### Epic 4: End-Customer Notification System
 Mid-tier clients' subscribers receive compliant, branded email notifications (with tone selection, opt-out mechanism, and recovery confirmation) — making the end-customer experience indistinguishable from a well-run in-house billing operation.
-**FRs covered:** FR22, FR23, FR24, FR25, FR26, FR27, FR28
+**FRs covered:** FR22, FR23, FR24, FR25, FR26, FR27, FR28, FR51, FR56
 
 ### Epic 5: Subscriber Detail, Analytics & Retention Emails
 A client can drill into any individual subscriber's full payment history, review recovery analytics and month-over-month trends, manage fraud flag resolutions, and receive automated emails that prove SafeNet's value (weekly digest + monthly "SafeNet saved you" email).
@@ -481,10 +485,10 @@ So that my dashboard is populated with real data before I take any action.
 **And** the dashboard UI is never blocked — the scan runs entirely as a background job (NFR-P2)
 **And** a triggered onboarding email is sent to the client (FR34)
 
-**Given** the hourly polling job (`poll_new_failures`) is registered with Celery beat
-**When** it runs every 60 minutes (±5 min tolerance)
+**Given** the daily polling job (`poll_new_failures`) is registered with Celery beat
+**When** it runs every 24 hours (±2h tolerance)
 **Then** it detects any new payment failures since the last poll for each connected account (FR6)
-**And** if a polling cycle is missed, an operator alert fires within 90 minutes (NFR-R1)
+**And** if a polling cycle is missed, an operator alert fires within 30 hours (NFR-R1)
 **And** rate limit errors trigger automatic retry — no cycle is abandoned due to throttling (NFR-P4)
 
 ---
@@ -574,15 +578,15 @@ So that I understand what I have access to and can upgrade when ready.
 
 **Given** a new account is created via Stripe Connect
 **When** the account is provisioned
-**Then** it is placed on a 30-day Mid-tier trial with full engine access and no payment method required (FR35)
-**And** polling runs at hourly frequency during the trial period
+**Then** it is placed on a 30-day Mid-tier trial with full email-send access and no payment method required (FR35)
+**And** polling runs at daily frequency during the trial period
 
 **Given** a trial account reaches day 30 without upgrading
 **When** the trial expiration job runs
 **Then** the account is automatically downgraded to Free tier (FR36)
-**And** polling frequency drops to twice-monthly
+**And** polling frequency drops to weekly
 **And** the dashboard displays the degradation prominently: "Your next scan is in X days" (FR37)
-**And** the recovery engine is deactivated — no new retries or notifications are sent
+**And** email sending is deactivated — no new dunning emails dispatched. Free tier shows the failed-payments list view-only.
 
 **Given** a Free-tier client views their dashboard
 **When** the tier indicator is rendered
@@ -593,12 +597,16 @@ So that I understand what I have access to and can upgrade when ready.
 **Given** a client clicks the upgrade CTA and completes Stripe Billing checkout
 **When** the subscription is confirmed via Stripe webhook
 **Then** the account is immediately upgraded to Mid tier
-**And** hourly polling resumes
-**And** the engine activation flow (DPA + mode selection) is presented if not previously completed
+**And** daily polling resumes
+**And** the DPA acceptance gate is presented before the first email send if not previously signed
 
 ---
 
-## Epic 3: Recovery Engine, Compliance & Customer Status Management
+## Epic 3 (v0): Recovery Engine, Compliance & Customer Status Management — QUARANTINED
+
+> **⚠️ QUARANTINED 2026-04-29.** This epic and all 5 stories below (3.1, 3.2, 3.3, 3.4, 3.5) are preserved on branch `archive/v0-recovery-engine` and are **not in the v1 product**. Reference: `_bmad-output/sprint-change-proposal-2026-04-29.md`.
+>
+> The simplified v1 Epic 3 follows immediately after this section.
 
 A Mid-tier client can activate the recovery engine (with DPA gate and mode selection), which then classifies failures, applies code-aware rules, enforces geo-compliance, manages the 4-state customer status machine, detects fraud, and handles card-update triggered retries.
 
@@ -781,25 +789,214 @@ So that I can spot fraud flags and urgent cases without scanning the entire subs
 
 ---
 
+## Epic 3 (v1): DPA Gate, Failed-Payments Dashboard & Email Actions
+
+A Mid-tier client signs the DPA, then opens their dashboard to see all current-month failed payments with a recommended dunning email per row. They click to send (single or batch), choose a different email type if they prefer, or mark a failure as resolved. Status transitions are polling-detected (Active → Recovered / Passive Churn) and Marc-initiated (manual resolve, exclude). No automated retries; no autopilot/supervised duality.
+
+**FRs covered:** FR3, FR10, FR16, FR17, FR18, FR19, FR52, FR53, FR54, FR55
+**UX-DRs covered:** UX-DR4 (simplified), UX-DR8 (reframed), UX-DR9, UX-DR10, UX-DR15
+
+### Story 3.1 (v1): DPA Acceptance Gate
+
+As a Mid-tier founder,
+I want to formally sign the Data Processing Agreement before SafeNet sends emails to my subscribers,
+So that I understand what SafeNet processes on my behalf and explicitly authorize the email-send capability.
+
+**Acceptance Criteria:**
+
+**Given** a client attempts to dispatch their first dunning email (per-row or bulk)
+**When** the dispatch endpoint is called and no `DPAAcceptance` record exists for the account
+**Then** the API rejects the send with a `403 DPA_REQUIRED` envelope
+**And** the frontend shows the DPA screen (not a modal embedded in a form) before any send button becomes active
+
+**Given** the DPA screen
+**When** the client clicks "I accept and sign"
+**Then** a `DPAAcceptance` record is created with timestamp, account FK, and the DPA version hash
+**And** the client is returned to the failed-payments dashboard with send buttons enabled
+
+**Given** an account that signed the v0 DPA before 2026-04-29
+**When** they next log in
+**Then** the v0 DPA acceptance is honored without re-acceptance (DPA version hash carries forward)
+
+**Given** Settings → Account
+**When** the client views the page
+**Then** DPA acceptance status is displayed: signed-on date and DPA version
+
+**Given** the client has not signed the DPA
+**When** they navigate the dashboard
+**Then** the failed-payments list is fully visible (view-only)
+**And** every send button shows a tooltip "Sign the DPA to enable email sends" and is disabled
+
+---
+
+### Story 3.2 (v1): Current-Month Failed-Payments Dashboard
+
+As a Mid-tier founder,
+I want a dashboard view of all failed payments from the current month with recommended emails per row,
+So that I can review and act on each at my own pace.
+
+**Acceptance Criteria:**
+
+**Given** the dashboard loads
+**When** the failed-payments list renders
+**Then** rows are filtered to `failure_created_at` within the current calendar month (account timezone)
+**And** each row displays: subscriber name + email, amount in cents formatted to €, plain-language decline reason via `DeclineCodeExplainer`, recommended email type chip, status badge (Active / Recovered / Passive Churn / Fraud Flagged), and last-email-sent timestamp if any
+
+**Given** the failed-payments list
+**When** the client clicks the column headers
+**Then** the list sorts by amount (desc/asc) or date (desc/asc) — selection persists in URL query params
+
+**Given** a Free-tier client
+**When** they view the failed-payments list
+**Then** action buttons (Send, Mark resolved, Exclude) are disabled with an upgrade CTA tooltip
+
+**Given** zero failed payments for the current month
+**When** the list renders
+**Then** the empty state shows: "No failed payments this month."
+
+**Given** a `fraud_flagged` row
+**When** rendered
+**Then** the recommended email chip displays "—" (no recommendation)
+**And** the row has an amber border to distinguish it from regular Active rows
+
+---
+
+### Story 3.3 (v1): Per-Row Send & Manual Resolve
+
+As a Mid-tier founder,
+I want to trigger a recommended (or chosen) dunning email per failed-payment row, and to manually mark failures as resolved,
+So that I act on each case without leaving the dashboard.
+
+**Acceptance Criteria:**
+
+**Given** a row with status `Active` and a non-null recommended email type
+**When** the client clicks "Send recommended"
+**Then** `POST /api/v1/subscribers/{id}/send-email/` is called with `{email_type: <recommended>}`
+**And** the dispatch service runs the opt-out check, then queues the Resend send
+**And** the audit log records `{action: "email_sent", email_type, trigger: "client_manual"}` (FR53)
+
+**Given** a row with status `Active`
+**When** the client opens the per-row dropdown "Send specific email"
+**Then** options shown are: Update payment / Retry reminder / Final notice
+**And** selecting any option sends that email type via the same endpoint (FR53)
+
+**Given** a row with any status
+**When** the client clicks "Mark resolved"
+**Then** the subscriber transitions to `Recovered` status with a manual-resolution audit note
+**And** the row's badge updates to Recovered (FR55)
+
+**Given** a row
+**When** the client clicks "Exclude from future recommendations"
+**Then** future recommendations for this subscriber are suppressed (recommended_email returns null)
+**And** the exclusion is recorded in the audit log
+
+**Given** an opted-out subscriber
+**When** the client triggers any send for that subscriber's row
+**Then** the dispatch service rejects the send with a clear error
+**And** no Resend call is made (FR26, FR27)
+
+**Given** an account hitting the rate limit (10 sends/min)
+**When** the client triggers an 11th send within the window
+**Then** the API responds 429 with retry-after seconds
+**And** the frontend surfaces a non-blocking toast
+
+---
+
+### Story 3.4 (v1): Bulk Send & Status Polling
+
+As a Mid-tier founder,
+I want to bulk-send dunning emails for multiple selected rows, and trust SafeNet to detect when subscribers pay or cancel through daily polling,
+So that I cover the high-leverage moves quickly without micromanaging each subscriber.
+
+**Acceptance Criteria:**
+
+**Given** the failed-payments list
+**When** the client selects rows via the checkbox column
+**Then** the bulk action toolbar slides up showing the selected count
+**And** primary action: "Send recommended (N)"
+**And** secondary action: "Send specific (chosen type)"
+**And** tertiary actions: "Mark resolved (N)", "Exclude (N)" (FR54)
+
+**Given** the client clicks "Send recommended (N)"
+**When** the confirmation dialog opens
+**Then** it shows the N rows with each row's recommended email type pre-listed
+**And** a "Send all" button confirms the bulk dispatch
+
+**Given** the bulk send confirms
+**When** `POST /api/v1/subscribers/batch-send-email/` is called
+**Then** each row dispatches with its own email type
+**And** partial failures surface per-row in a result toast (UX-DR8 reframed)
+**And** the audit log records one entry per send
+
+**Given** the daily polling Celery task runs
+**When** it detects a subscription state of `cancelled`, `unpaid`, `paused`, or `cancel_at_period_end`
+**Then** the subscriber transitions Active → Passive Churn with the specific reason recorded (FR18)
+
+**Given** the daily polling Celery task runs
+**When** it detects a previously-failed PaymentIntent now succeeded
+**Then** the subscriber transitions Active → Recovered (FR17)
+**And** the recovery confirmation email is dispatched per FR25 (Story 4.3)
+
+**Given** Free-tier client
+**When** they attempt to multi-select
+**Then** the bulk toolbar surfaces an upgrade CTA; bulk send is paid-only
+
+---
+
+### Story 3.5 (v1): Recommended-Email Mapping (Decline Code → Email Type)
+
+As a developer,
+I want the rule engine to map each decline code to a recommended email type and time-since-failure escalation,
+So that the dashboard's per-row recommendation is data-driven and testable.
+
+**Acceptance Criteria:**
+
+**Given** the `DECLINE_RULES` config
+**When** loaded
+**Then** the action vocabulary is `{update_payment, retry_reminder, final_notice, fraud_flag, no_recommendation}` (FR10)
+**And** retry_cap, payday_aware, geo_block fields remain in the config but are not consulted in v1 (v2 reactivation-ready)
+
+**Given** a failure
+**When** `get_recommended_email(decline_code, days_since_failure)` is called
+**Then** day 0–6 returns `update_payment`
+**And** day 7–13 returns `retry_reminder`
+**And** day 14+ returns `final_notice`
+**And** `fraudulent` decline code returns `fraud_flag` (no recommendation)
+**And** unknown decline codes via `_default` return `update_payment`
+
+**Given** the recommended email logic
+**When** unit tests run via pytest
+**Then** the module is pure-Python, zero DB dependency, fully exercisable without fixtures
+**And** branch coverage ≥95% for the recommendation function
+
+**Given** a `SubscriberFailure` row serialized for the frontend
+**When** the response is built
+**Then** the response includes `recommended_email_type` derived from the rule engine + time-since-failure
+**And** `geo_warning: true` is included for SEPA/UK payment-method countries (informational only)
+
+---
+
 ## Epic 4: End-Customer Notification System
 
 Mid-tier clients' subscribers receive compliant, branded email notifications — making the end-customer experience indistinguishable from a well-run in-house billing operation.
 
-**FRs covered:** FR22, FR23, FR24, FR25, FR26, FR27, FR28, FR50
+**FRs covered:** FR22, FR23, FR24, FR25, FR26, FR27, FR28, FR50, FR51, FR56
 **UX-DRs covered:** UX-DR17
 
 ### Story 4.1: Resend Integration & Branded Failure Notification Email
 
 As a Mid-tier founder,
-I want SafeNet to automatically send a branded payment failure notification to my subscriber using my SaaS name,
+I want SafeNet to send a branded payment failure notification to my subscriber using my SaaS name when I trigger it,
 So that my subscriber receives a professional, human-feeling email that feels like it came from me.
 
 **Acceptance Criteria:**
 
 **Given** the Resend email provider is configured
-**When** a notification action is triggered by the engine
+**When** a client triggers a dunning email send via the failed-payments dashboard (per-row or batch action)
 **Then** the email is sent from the SafeNet-managed shared sending domain (`payments.safenet.app`) with the client's brand name in the `From` field (e.g., "ProductivityPro via SafeNet") (FR28)
-**And** the email contains: a clear explanation of the failure (plain language, no Stripe jargon), a single card-update CTA linking to the Stripe customer portal, an opt-out link, and the client's brand name throughout (FR22, FR26)
+**And** the email contains: a clear explanation of the failure (plain language, no Stripe jargon), a single card-update CTA linking to the configured redirect link (FR51), an opt-out link, and the client's brand name throughout (FR22, FR26)
+
+> **Trigger note:** The engine-driven auto-trigger path is quarantined to `archive/v0-recovery-engine`. v1 sends are exclusively client-initiated via the failed-payments dashboard.
 
 **Given** a `card_expired` failure
 **When** the notification email is sent
@@ -836,6 +1033,19 @@ So that the emails reflect my brand voice before any subscriber sees them.
 **Then** Professional: formal, direct, no contractions; Friendly: warm, conversational; Minimal: bare facts, two sentences maximum
 **And** all three tones comply with GDPR transactional classification — zero marketing content
 
+**Given** the Settings → Notifications screen
+**When** the client views the redirect link section
+**Then** an input field shows the redirect link (URL, defaults to the Stripe customer portal URL)
+**And** the client can edit it; on save, validation enforces `https://` scheme + reachable URL pattern
+**And** the link is embedded in all subsequent dunning emails as the subscriber's "update payment" CTA target (FR51)
+
+**Given** a paid-tier (Mid or Pro) client on the Settings → Notifications screen
+**When** they expand the "Custom email body" section
+**Then** they see three textarea editors: Update payment / Retry reminder / Final notice
+**And** each starts pre-filled with the current tone-preset's default body
+**And** they can edit each independently; on save, the custom body overrides the tone preset for that email type (FR56)
+**And** Free-tier clients see the editors disabled with an upgrade CTA
+
 ---
 
 ### Story 4.3: Final Notice & Recovery Confirmation Emails
@@ -846,22 +1056,24 @@ So that every outcome is communicated clearly and the subscriber relationship is
 
 **Acceptance Criteria:**
 
-**Given** a subscriber is on their final retry attempt (retry cap − 1 attempts exhausted)
-**When** the engine queues the last retry
-**Then** a final notice email is sent to the subscriber before the retry fires (FR24)
-**And** the email states explicitly and honestly: "This is our last attempt to process your payment. If unsuccessful, your subscription will be paused."
-**And** the selected tone preset is applied
+**Given** a subscriber row on the failed-payments dashboard
+**When** the client triggers a "Final notice" email type for that row (per-row or via bulk action with email type "Final notice" chosen)
+**Then** a final notice email is sent to the subscriber (FR24)
+**And** the email states explicitly and honestly: "This is our last attempt to remind you about your unpaid invoice. Please update your payment method to keep your subscription active."
+**And** the selected tone preset is applied (or the custom body, if a paid-tier override is configured)
 
-**Given** a retry succeeds and the subscriber transitions to `recovered`
-**When** the post-transition signal fires
-**Then** a recovery confirmation email is sent to the subscriber (FR25)
+**Given** the daily polling job detects a previously-failed PaymentIntent has succeeded, OR the client manually marks the failure as resolved
+**When** the status transition is recorded
+**Then** a recovery confirmation email is sent to the subscriber within the next polling cycle (FR25)
 **And** the email is brief (two sentences maximum): "All sorted — payment confirmed. Thanks for updating your details."
-**And** the email is sent within 5 minutes of the successful retry
 
 **Given** either email type
 **When** rendered
 **Then** an opt-out link is present and functional (FR26)
 **And** the sender identity is the client's brand via the SafeNet shared domain (FR28)
+**And** the configured redirect link is embedded as the "update payment" CTA target (FR51)
+
+> **Trigger note:** FSM auto-transition signal trigger (`is_last_retry`, retry-success post-transition signal) is quarantined to `archive/v0-recovery-engine`. v1 final notice is client-triggered; v1 recovery confirmation is polling-detected or manual-resolve-driven.
 
 ---
 
@@ -931,9 +1143,10 @@ So that I can regain access to my account without re-authorizing through Stripe.
 
 ## Epic 5: Subscriber Detail, Analytics & Retention Emails
 
-A client can drill into any individual subscriber's payment history, review recovery analytics and month-over-month trends, resolve fraud flags, and receive automated emails proving SafeNet's value.
+A client can drill into any individual subscriber's payment history, resolve fraud flags, receive a weekly digest, and benefit from automated retention/email purges. Recovery analytics + month-over-month dashboard and the monthly-savings email are deferred to v2 — both depended on auto-recovery semantics that the v1 simplification removed.
 
-**FRs covered:** FR20, FR21, FR31, FR32, FR33, FR38
+**FRs covered:** FR20, FR21, FR33
+**Deferred to v2:** FR31, FR32, FR38
 **NFRs:** NFR-D1, NFR-D2, NFR-D3
 
 ### Story 5.1: Subscriber Detail Panel & Payment Timeline
@@ -946,7 +1159,7 @@ So that I can understand exactly what happened to each subscriber and have full 
 
 **Given** a client clicks any subscriber card on the dashboard
 **When** the subscriber detail `Sheet` opens (slides from right)
-**Then** it displays: subscriber name + email, current status badge, full payment history (all charge attempts chronologically), each failure's decline code with plain-language explanation, all engine actions taken (retries fired, notifications sent, status changes), and current status (FR20)
+**Then** it displays: subscriber name + email, current status badge, full payment history (all charge attempts chronologically), each failure's decline code with plain-language explanation, all email send history (per email type, timestamps), status transitions, and manual notes (FR20)
 **And** the data is fetched from `GET /api/v1/subscribers/{id}/timeline/` in a single request — no secondary fetches required
 
 **Given** a subscriber with `fraud_flagged` status
@@ -988,7 +1201,9 @@ So that the case is formally closed in the audit trail and I can move on with fu
 
 ---
 
-### Story 5.3: Recovery Analytics & Month-over-Month Dashboard
+### Story 5.3: Recovery Analytics & Month-over-Month Dashboard — DEFERRED TO V2
+
+> **Deferred under 2026-04-29 simplification** — the analytics framing depended on the auto-recovery engine ("retries fired", "notifications that drove card updates"). Reframe + reactivate when v1 has real send-volume data.
 
 As a founder,
 I want to view recovery analytics and month-over-month trends in my dashboard,
@@ -1012,7 +1227,9 @@ So that I can track SafeNet's performance over time and have data to justify the
 
 ---
 
-### Story 5.4: Weekly Digest Email, Monthly Savings Email & Data Retention
+### Story 5.4: Weekly Digest Email & Data Retention (Monthly Savings — Deferred)
+
+> **Split under 2026-04-29 simplification:** Weekly digest + retention purge stay in v1. Monthly savings email is deferred to v2 (recovery framing changes when sends are client-initiated; defer one cycle and revisit with real data).
 
 As a founder,
 I want to receive automated emails summarizing SafeNet's activity and proven value,
@@ -1022,13 +1239,10 @@ So that I stay informed passively and have clear evidence of ROI without checkin
 
 **Given** a Mid-tier client with the weekly digest enabled (off by default)
 **When** the weekly digest job runs (every Monday)
-**Then** an email is sent summarizing: recovery activity, active retries in progress, and new Passive Churn flags that week (FR33)
+**Then** an email is sent summarizing: dunning emails sent that week (per type), payments recovered (polling-detected + manually-resolved), and new Passive Churn flags that week (FR33)
 **And** the digest is sent only to clients who have explicitly opted in via Settings → Notifications
 
-**Given** a Mid-tier client's billing date arrives
-**When** the monthly savings email job runs
-**Then** an email is sent: "This month, SafeNet recovered €X for you. Your plan costs €29. Net benefit: €Y." (FR38)
-**And** the recovered amount and net benefit are calculated from actual audit log data for that billing period
+> **Monthly savings email (FR38) — DEFERRED to v2.** Reframe in v2 when send-volume data is available.
 
 **Given** payment event metadata in the database
 **When** an event's `created_at` is more than 24 months ago
@@ -1044,9 +1258,10 @@ So that I stay informed passively and have clear evidence of ROI without checkin
 
 ## Epic 6: Operator Administration Console
 
-The SafeNet operator can monitor all scheduled retries, intervene when needed, and review the full audit trail — with strict access control ensuring no client reaches operator capabilities.
+The SafeNet operator can review the full audit trail, manually advance subscriber statuses for edge cases, and inspect email-send history — with strict access control ensuring no client reaches operator capabilities. Scheduled-retry dashboard removed: no retries to schedule in v1.
 
-**FRs covered:** FR40, FR41, FR42, FR43, FR44, FR45
+**FRs covered:** FR42, FR43, FR44, FR45
+**Deferred to v2:** FR40, FR41
 **NFRs:** NFR-S4, NFR-R3, NFR-R5
 
 ### Story 6.1: Operator Authentication & Console Access Isolation
@@ -1064,7 +1279,7 @@ So that clients can never access operator capabilities regardless of how they na
 
 **Given** an operator with `is_staff=True` logs in to `/ops-console/`
 **When** they authenticate
-**Then** they have access to all operator capabilities: scheduled retry dashboard, manual override, status advancement, audit log viewer
+**Then** they have access to all operator capabilities: manual status advancement, audit log viewer, email-send history per account
 **And** no client-facing data modification is possible from operator routes
 
 **Given** a client account
@@ -1073,13 +1288,15 @@ So that clients can never access operator capabilities regardless of how they na
 
 ---
 
-### Story 6.2: Scheduled Retry Dashboard & Manual Override
+### Story 6.2: Scheduled Retry Dashboard & Manual Override — DEFERRED TO V2
+
+> **Deferred under 2026-04-29 simplification.** No retries to schedule in v1. The full operator workflow described in this story applies only to the v2 quarantine branch (`archive/v0-recovery-engine`). Retain the original spec text below as v2 inventory; do not implement on main.
 
 As the SafeNet operator,
 I want to see all retries scheduled to fire across all accounts and cancel any that look problematic before they execute,
 So that I can intervene on edge cases without waiting for clients to report issues.
 
-**Acceptance Criteria:**
+**Acceptance Criteria (v2-only — not in v1 product):**
 
 **Given** the operator console retry dashboard
 **When** I view it
@@ -1108,13 +1325,13 @@ So that I can handle edge cases with full accountability and review all engine a
 
 **Given** the operator selects a subscriber in the console
 **When** they click "Advance status" and select the target status
-**Then** the subscriber's status is advanced via the FSM (respecting valid transitions) (FR42)
+**Then** the subscriber's status is updated (with reason recorded in audit log) for edge cases the polling detection misses (FR42)
 **And** `write_audit_event(subscriber, actor="operator", action="status_advanced", outcome="success", metadata={from: "active", to: "passive_churn", reason: "..."})` is called
 **And** a reason is required — the form does not submit without one
 
 **Given** the audit log viewer in the operator console
 **When** I filter by account or by subscriber
-**Then** I see the complete append-only audit log: every retry fired, notification sent, status change, manual override, and system event — with timestamp, actor, action, and outcome (FR43, FR44)
+**Then** I see the complete append-only audit log: every email sent, status change, manual override, and system event — with timestamp, actor, action, and outcome (FR43, FR44)
 **And** no record in the audit log can be modified or deleted through any application interface (NFR-R3)
 **And** audit logs are retained for 36 months (NFR-D2)
 

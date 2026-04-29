@@ -32,7 +32,7 @@ Solo or small team (≤5), MRR-positive on Stripe, attention-constrained. Needs 
 Subscriber unaware of billing unless it breaks. Needs a branded, human-feeling notification that feels like it came from the SaaS she trusts — not a third-party debt tool.
 
 **Tertiary — The SafeNet Operator**
-Internal admin. Needs override capability, full retry schedule visibility, and audit trail access. Power-user density acceptable here.
+Internal admin. Needs audit trail access, manual status advancement for edge cases, and Django admin oversight. No retry schedule (no retries in v1). Power-user density acceptable here.
 
 ### Key Design Challenges
 
@@ -42,7 +42,7 @@ Internal admin. Needs override capability, full retry schedule visibility, and a
 
 3. **Free tier as ROI calculator, not locked preview.** The "estimated recoverable revenue" figure must feel real and compelling — the UX around it should make the upgrade decision feel obvious, not coerced.
 
-4. **Mode clarity at all times.** Supervised vs. Autopilot must be unmistakably visible. A mistaken mode assumption is a silent trust failure.
+4. **Per-row clarity over engine clarity.** Marc decides per row, not per global setting. Each row's recommended email + status badge + amount communicates the situation at a glance.
 
 ### Design Opportunities
 
@@ -61,7 +61,7 @@ SafeNet's core loop is a reading, not an action. Marc opens the dashboard to *se
 The product has three active interaction moments, each with a distinct weight:
 
 - **Stripe Connect** — zero-friction OAuth. One click, no API keys, immediate scan. The faster Marc reaches populated data, the faster trust is established.
-- **Trial activation / Autopilot toggle** — a single, low-ceremony decision. Feels like flipping a switch, not configuring a system.
+- **Daily failed-payments review** — Marc opens the dashboard, scans the current month's failed payments, and sends recommended dunning emails per row or in bulk. Review, not configure.
 - **Fraud flag review** — the one moment SafeNet asks Marc to think. Must serve complete context (payment history, decline event, customer status) without overwhelming him.
 
 ### Platform Strategy
@@ -75,40 +75,39 @@ The product has three active interaction moments, each with a distinct weight:
 ### Effortless Interactions
 
 - **Dashboard read** — the primary KPI (recovered this month) must be readable in under 2 seconds without any scrolling or navigation.
-- **Autopilot mode** — once activated, SafeNet runs without Marc's involvement. No recurring decisions required.
+- **Per-row send** — one click on a row's "Send recommended" button dispatches the right email. No mode toggles, no global config.
 - **Stripe Connect onboarding** — OAuth in one click. The retroactive scan begins immediately; Marc never sees an empty state.
 - **Recovery confirmation** — Marc learns about recoveries passively (email digest, dashboard update) without needing to check in.
 
-### Supervised Mode
+### Daily Review Workflow
 
-Supervised is a **batch review and exclusion tool**, not a fully manual recovery flow. Marc uses it to stay in control of edge cases — not to approve every retry manually.
+Marc opens his SafeNet dashboard once a day (or once a week — his cadence). The dashboard shows the **current month's failed payments**. Each row has a **recommended dunning email** pre-selected based on the decline code + time since failure. Marc reviews, accepts, or overrides per row, then either clicks send-per-row or selects multiple and bulk-sends. The flow is *review, not configure.*
 
-**Core Supervised interaction:**
-- A review queue surfaces clients with pending actions (retry, email, or both), each with a recommended action based on the decline code.
-- Marc can select multiple clients and apply the recommended action in bulk (batch approve).
-- Marc can also exclude specific clients from automation entirely.
-- Default recommendation per decline code is pre-selected — Marc confirms or overrides, never starts from scratch.
+**Core review interaction:**
+- A list surfaces all current-month failed payments — each row shows subscriber, amount, decline reason (plain language), days since failure, and the recommended email type.
+- Marc can click "Send recommended" on a single row, or multi-select rows and click "Send recommended (N)" in bulk.
+- For paid tiers, Marc can override the recommended type with a specific email type (Update Payment / Retry Reminder / Final Notice).
+- Marc can also "Mark resolved" with a note (e.g., paid via wire) or "Exclude" rows whose subscriber has opted out.
+- No retries fire automatically. No mode toggle. The list *is* the product.
 
 ### Onboarding & DPA Flow
 
-The Data Processing Agreement (DPA) is a **formal legal step**, presented as a distinct screen before the recovery engine activates. It is not embedded invisibly in a checkbox. Marc reads what SafeNet processes, on whose behalf, and under what terms — and explicitly signs.
+The Data Processing Agreement (DPA) is a **formal legal step**, presented as a distinct screen before the first dunning email is sent. It is not embedded invisibly in a checkbox. Marc reads what SafeNet processes, on whose behalf, and under what terms — and explicitly signs.
 
 **Onboarding sequence:**
 1. Land on marketing site
 2. Connect with Stripe (OAuth, one click)
 3. Profile completion: first name, last name, company/SaaS name, password
-4. Redirect to dashboard (retroactive scan running in background)
+4. Redirect to dashboard (90-day retroactive scan running in background)
 5. Dashboard populates — first insight delivered, no action required
-6. CTA: "Activate recovery engine" → 30-day trial
-7. DPA presented as formal step — explicit signature/acceptance
-8. Autopilot / Supervised selection
-9. Engine activates
+6. (When Marc is ready to send first email) DPA presented as formal step — explicit signature/acceptance
+7. Email sending capability unlocked — Marc can now send recommended dunning emails per row or in bulk
 
 ### Critical Success Moments
 
 1. **First-load populated dashboard** — The scan completes and Marc sees real numbers (failures, estimated recoverable revenue, decline breakdown) before he's done anything. This is the product's first proof of value.
 
-2. **First recovery notification** — The email that says "Payment recovered — €X from a subscriber who updated their card" while Marc wasn't watching. This is the emotional proof that Autopilot works.
+2. **First recovery confirmation** — The dashboard updates with "Payment recovered — €X from a subscriber who updated their card after Marc sent the recommended email." This is the emotional proof the dunning loop works.
 
 3. **30-day billing email** — "SafeNet recovered €X for you. Your plan costs €29. Net benefit: €Y." The conversion moment. The math must be undeniable.
 
@@ -124,7 +123,7 @@ The Data Processing Agreement (DPA) is a **formal legal step**, presented as a d
 
 4. **Trust through restraint.** SafeNet does two things. The UI should reflect that — no feature sprawl, no option overload. Every screen has a clear primary action or a clear primary reading.
 
-5. **Supervised empowers, Autopilot disappears.** Supervised mode gives Marc control without creating work — batch actions, pre-selected recommendations, frictionless exclusions. Autopilot asks nothing of him and delivers proof passively.
+5. **Recommendations empower, defaults disappear.** Each row's recommended email is pre-selected based on decline code + days elapsed. Marc reviews and accepts in one click — batch actions, pre-selected recommendations, frictionless exclusions. The work is *review*, not *configure*.
 
 ## Desired Emotional Response
 
@@ -145,7 +144,7 @@ This is not a tool Marc configures. It's a presence he trusts.
 |-------|--------|----------------|
 | Discovery | Landing page | Intrigue — "this is different" |
 | First login | Populated dashboard | Revelation + Excitement — "here's how much I can get back" |
-| Trial activation | Autopilot toggle | Confidence — "I'm covered" |
+| First email send | DPA accepted, "Send recommended" clicked | Confidence — "I'm in control" |
 | First recovery email | Passive notification | Pleasant surprise — "it worked while I wasn't watching" |
 | Fraud flag | Red badge on dashboard | Calm trust — "SafeNet caught it and stopped" |
 | Passive Churn | Customer graduates | Informed peace — "everything possible was done" |
@@ -209,9 +208,9 @@ SafeNet's information funnel:
 "What's happening with this specific person?"
 → Full payment history, decline events, actions taken, current status, manual controls if needed.
 
-**Level 4 — The Action (Supervised review queue)**
-"What do I need to approve or override?"
-→ Pending actions with pre-selected recommendations. Batch controls. Exclusion management.
+**Level 4 — The Action (Failed-payments list)**
+"What do I want to send today?"
+→ Current-month failed payments with pre-selected recommended emails. Per-row send. Bulk send. Exclusion + manual resolve.
 
 Each level is only reached when Marc chooses to go there. The dashboard never front-loads level 3 information onto a level 1 screen.
 
@@ -233,8 +232,8 @@ No direct product references were provided. The following analysis is grounded i
 
 **Interaction Patterns:**
 - **Progressive detail cards** — subscriber list shows name, status badge, and one key metric (amount at risk or recovered). Clicking expands or navigates to full detail. No table rows with 8 columns.
-- **Batch action with pre-selection** — in Supervised mode, recommended actions are pre-selected per decline code. Marc reviews the recommendation, not a blank form. Cognitive load close to zero.
-- **Ambient engine status** — a persistent, unobtrusive indicator shows engine state (running / last scan / next scheduled action). Always visible, never distracting. Like a heartbeat monitor in the corner.
+- **Batch action with pre-selection** — recommended emails are pre-selected per decline code + days elapsed. Marc reviews the recommendation, not a blank form. Cognitive load close to zero.
+- **Ambient polling status** — a persistent, unobtrusive indicator shows polling state (last poll / next poll). Always visible, never distracting. Like a heartbeat monitor in the corner.
 
 **Visual Patterns:**
 - **Single hero metric** — one number dominates the dashboard. All other metrics support it, never compete with it.
@@ -243,8 +242,8 @@ No direct product references were provided. The following analysis is grounded i
 
 ### Anti-Patterns to Avoid
 
-- **Transaction-first views** — showing a list of payment events instead of a list of subscribers. Marc thinks in people, not transactions. A subscriber with 3 retry attempts is one person, not 3 rows.
-- **Alert inflation** — surfacing every engine action as a notification. The engine running correctly is not news. Only exceptions (fraud flag, Passive Churn graduation, retry cap reached) warrant surfacing.
+- **Transaction-first views** — showing a list of payment events instead of a list of subscribers. Marc thinks in people, not transactions. A subscriber with multiple failed invoices is one person, not many rows.
+- **Alert inflation** — surfacing every polling pass as a notification. Polling running correctly is not news. Only exceptions (fraud flag, Passive Churn graduation, polling overdue >30h) warrant surfacing.
 - **Feature sprawl on first load** — settings panels, configuration options, and advanced controls visible on the main dashboard create the impression of complexity before Marc has understood the basics.
 - **Loss framing** — "€640 in failed payments" reads as a problem Marc caused. "€640 recoverable" reads as an opportunity SafeNet will handle. Same number, entirely different emotional register.
 - **Jargon leakage** — decline codes, retry caps, state machine terminology must never appear in the founder-facing UI. These belong in the engine, not the dashboard.
@@ -259,7 +258,7 @@ No direct product references were provided. The following analysis is grounded i
 
 **Adapt:**
 - Stripe's typographic clarity — apply to a recovery-specific information hierarchy rather than a general payments context
-- Linear's earned complexity — surface power features (Supervised queue, admin overrides, audit log) only when navigated to, never on the primary view
+- Linear's earned complexity — surface power features (manual resolve, custom email body, audit log) only when navigated to, never on the primary view
 
 **Avoid:**
 - Any pattern that requires Marc to parse technical information to understand his recovery status
@@ -352,7 +351,9 @@ If both answers are yes, the design is right.
 - `EngineStatusBar` — ambient indicator: engine state, last scan, next action
 - `RecoveryHeroCard` — dominant "recovered this month" display
 - `DeclineCodeExplainer` — plain-language translation of Stripe codes
-- `BatchActionToolbar` — Supervised mode multi-select controls
+- `BatchActionToolbar` — failed-payments multi-select controls; primary action: 'Send recommended (N)'; secondary: 'Send specific (chosen type)'; tertiary: 'Mark resolved (N)' / 'Exclude (N)'
+- `RedirectLinkInput` — settings input for Marc's payment-update redirect URL embedded in dunning emails (FR51)
+- `CustomBodyEditor` — paid-tier text editor for Marc to provide custom body text per email type (FR56)
 
 ## 2. Core User Experience
 
@@ -377,9 +378,9 @@ Failed payments are a problem to chase. Marc knows they exist, suspects they're 
 Failed payments are a categorised recovery opportunity, not an undifferentiated problem. Each failure has a reason, and each reason has a fix. The engine handles the fix. Marc sees the outcome.
 
 **Where confusion is likely:**
-- The distinction between Supervised and Autopilot modes at activation — clear labelling and a concrete explanation of what each mode means for his subscribers is essential
+- The recommended-email logic — Marc may initially wonder why a row recommends "Final Notice" instead of "Update Payment". A concise plain-language hint ("Failed 14 days ago — escalation recommended") clarifies the rule
 - The Fraud Flagged status — Marc may initially read "fraud" as something he or his subscriber did wrong. The UI must immediately reframe: this is a card issuer signal, and SafeNet's correct response is to stop, not act
-- Passive Churn graduation — Marc may read this as "subscriber lost." The UI frames it as: SafeNet completed its full recovery sequence; the outcome is documented and closed
+- Passive Churn graduation — Marc may read this as "subscriber lost." The UI frames it as: SafeNet documented the outcome; the row is closed
 
 ### 2.3 Success Criteria
 
@@ -391,8 +392,8 @@ Failed payments are a categorised recovery opportunity, not an undifferentiated 
 
 **Ongoing use:**
 - Primary KPI (recovered this month) readable in <2 seconds on return visit
-- Engine status visible at all times — Marc never has to "check if it's running"
-- Supervised review queue completable in <2 minutes for typical batch size
+- Polling status visible at all times — Marc never has to "check if it's running"
+- Failed-payments review + bulk send completable in <2 minutes for typical batch size
 - Fraud flag state immediately legible — no ambiguity about what happened and what SafeNet did
 
 **Emotional success:**
@@ -415,7 +416,7 @@ Failed payments are a categorised recovery opportunity, not an undifferentiated 
 
 2. **Status-centric subscriber view** — SafeNet organises subscribers by recovery status, not by transaction date or amount. This is a different mental model from Stripe's transaction log. A brief orientation label ("Your subscribers, grouped by recovery status") resolves this on first encounter.
 
-3. **Pre-selected batch recommendations** — Supervised mode presents pending actions with the recommended action already selected per decline code. This is a novel variant of standard approval flows. The UI must make clear that the recommendation comes from the decline-code rule engine, not a random default.
+3. **Pre-selected batch recommendations** — the failed-payments list presents each row with a recommended email type already selected per decline code + days elapsed. This is a novel variant of standard approval flows. The UI must make clear that the recommendation comes from the decline-code rule, not a random default.
 
 ### 2.5 Experience Mechanics
 
@@ -427,31 +428,33 @@ Failed payments are a categorised recovery opportunity, not an undifferentiated 
 
 **Feedback:** Dashboard populates in a single reveal — not piece by piece. Hero metric appears first (estimated recoverable revenue). Failure breakdown appears below. A brief callout highlights the largest opportunity category.
 
-**Completion:** Dashboard is live. A subtle prompt: *"Your recovery engine is ready. Start your 30-day trial."* The CTA is anchored below the estimated recoverable figure — the math is always visible when Marc makes the decision.
+**Completion:** Dashboard is live with the failed-payments list populated. A subtle prompt: *"Send your first dunning email."* The CTA opens the DPA flow when Marc is ready.
 
 ---
 
-#### The Autopilot Activation
+#### The First Email Send (DPA Gate)
 
-**Initiation:** Marc clicks "Activate recovery engine" CTA.
+**Initiation:** Marc clicks "Send recommended" on a row, or "Send first dunning email" CTA, before having accepted the DPA.
 
-**Interaction:** Trial confirmation screen → DPA presented as formal document with explicit sign/accept action → Mode selection: Autopilot or Supervised, with plain-language explanation of each.
+**Interaction:** DPA presented as formal document with explicit sign/accept action. Plain-language summary of what SafeNet will process and on whose behalf.
 
-**Feedback:** Engine activates. Dashboard shows engine status indicator: *"Active — next scan in [X] minutes."* Confirmation message: *"SafeNet is now running. You don't need to do anything else."*
+**Feedback:** Email sending capability unlocks. Confirmation toast: *"DPA signed. You can now send dunning emails per row or in bulk."* The intended row's email dispatches.
 
-**Completion:** Marc is done. The tab can close. SafeNet works.
+**Completion:** Marc is back on the dashboard. The DPA gate is satisfied for all subsequent sends.
 
 ---
 
-#### The Supervised Review Queue
+#### The Daily Failed-Payments Review
 
-**Initiation:** Marc navigates to the Supervised queue (sidebar nav or dashboard prompt when pending actions exist). Badge count on nav item indicates pending reviews.
+**Initiation:** Marc navigates to the dashboard. The failed-payments list shows the current month's failures. Badge on nav item indicates count of pending rows.
 
 **Interaction:** List of subscribers with pending actions. Each row shows: subscriber name, decline reason (plain language), recommended action (pre-selected), and amount at risk. Multi-select checkboxes on the left. Batch action toolbar appears on selection: "Apply recommended actions" / "Exclude from automation."
 
-**Feedback:** Selected action confirmed with count — *"3 actions queued."* Rows clear from the queue as actions are confirmed. Zero-state message when queue is empty: *"All caught up — no pending reviews."*
+**Interaction:** Marc reviews per-row recommended emails, accepts via "Send recommended", overrides via "Send specific…", multi-selects for bulk send, or marks rows resolved/excluded.
 
-**Completion:** Queue is empty. Marc returns to dashboard.
+**Feedback:** Selected action confirmed with count — *"3 emails dispatched."* Rows clear from the list as actions are confirmed. Zero-state message: *"No failed payments this month. Your subscribers are paying — keep shipping."*
+
+**Completion:** List is reviewed. Marc closes the tab.
 
 ---
 
@@ -553,7 +556,7 @@ All user-facing text is written at a reading level accessible to a non-technical
 └───────────┴─────────────────────────────────────┘
 ```
 
-- **Sidebar:** Fixed 240px. Navigation items, engine status indicator, mode toggle (Autopilot / Supervised). Collapses to icon rail on narrower viewports.
+- **Sidebar:** Fixed 240px. Navigation items, polling status indicator (last poll · next poll). No mode toggle — Marc decides per row, not per global setting. Collapses to icon rail on narrower viewports.
 - **Main content:** Fluid within max-width 1280px. 32px padding on all sides. Hero metric area occupies full width at top. Content below follows a 12-column grid with 24px gutters.
 - **Cards:** Standard border-radius 8px. Border `1px solid --border`. Padding 24px. No drop shadows — borders only. Consistent with the "restrained, precise" brand character.
 
@@ -630,28 +633,24 @@ flowchart TD
     F --> G[Retroactive scan runs\n'Scanning 90 days of activity...']
     G --> H{Data found?}
     H -- No failures found --> I[Empty state:\n'No failed payments in 90 days.\nWe'll keep watching.']
-    H -- Failures found --> J[Dashboard populates\nEstimated recoverable · breakdown · status]
-    J --> K[CTA visible:\n'Activate recovery engine — 30-day trial']
+    H -- Failures found --> J[Dashboard populates\nFailed-payments list · breakdown · status]
+    J --> K[CTA visible (when Marc is ready):\n'Send first dunning email']
     K --> L{Marc clicks CTA?}
-    L -- Not yet --> M[Free tier: dashboard\nread-only, no engine]
-    L -- Yes --> N[Trial confirmation screen]
-    N --> O[DPA presented\nFormal sign/accept]
+    L -- Not yet --> M[Free tier: dashboard\nview-only, no email send]
+    L -- Yes --> O[DPA presented\nFormal sign/accept]
     O --> P{DPA accepted?}
-    P -- No --> Q[Stays on free tier\nDPA reminder shown]
-    P -- Yes --> R[Mode selection:\nAutopilot or Supervised?]
-    R -- Autopilot --> S[Engine activates\nStatus: Active · next scan in 60min]
-    R -- Supervised --> T[Engine activates\nReview queue enabled]
-    S --> U([Dashboard: 'SafeNet is running.\nYou don't need to do anything else.'])
-    T --> U
+    P -- No --> Q[Stays view-only\nDPA reminder shown]
+    P -- Yes --> S[Email sending unlocked\nMarc returns to failed-payments list]
+    S --> U([Dashboard: 'You can now send recommended\ndunning emails per row or in bulk.'])
 ```
 
 **UX notes:**
 - Scan screen is full-screen, no partial data shown during scan
 - Dashboard populates in a single reveal — not incrementally
-- CTA is anchored directly below the estimated recoverable figure
+- CTA is anchored directly below the failed-payments summary
 - DPA is a distinct screen, never a checkbox in a form
-- Mode selection uses plain language: "Approve each action manually" vs. "SafeNet handles everything"
-- Post-activation message is reassuring, not instructional
+- DPA gate sits before email send, not before any "engine activation" — there is no engine in v1
+- Post-acceptance message is reassuring, not instructional
 
 ---
 
@@ -692,75 +691,94 @@ flowchart TD
 
 ---
 
-### Journey 3: Supervised Review Queue
+### Journey 3: Daily Failed-Payments Review
 
-**Goal:** Marc reviews pending actions in Supervised mode, approves recommendations in bulk, and excludes one subscriber.
+**Goal:** Marc opens the dashboard, scans the current month's failed payments, accepts most recommendations, and bulk-sends.
 
 ```mermaid
 flowchart TD
-    A([Marc sees badge on 'Review Queue' nav item]) --> B[Opens review queue]
-    B --> C[Queue shows N subscribers\nwith pending actions]
-    C --> D[Each row: name · reason · recommended action · amount]
-    D --> E{Marc reviews rows}
-    E -- Agrees with all --> F[Selects all via checkbox]
-    F --> G[Batch toolbar appears:\n'Apply recommended actions' button]
-    G --> H[Clicks 'Apply recommended actions']
-    H --> I['3 actions queued' confirmation]
-    E -- Wants to exclude one --> J[Deselects that subscriber]
-    J --> K[Clicks subscriber row to expand]
-    K --> L[Sees full detail:\nhistory · decline reason · recommended action]
-    L --> M[Clicks 'Exclude from automation']
-    M --> N[Exclusion modal:\n'This subscriber will not receive\nautomated retries or notifications.']
-    N --> O{Confirm exclusion?}
-    O -- Yes --> P[Subscriber excluded\nRemoved from queue]
-    O -- No --> Q[Returns to queue row]
-    P --> R[Selects remaining rows]
-    R --> G
-    I --> S{Queue empty?}
-    S -- Yes --> T(['All caught up — no pending reviews.'\nZero state with engine status])
-    S -- No --> E
+    A([Marc opens dashboard]) --> B[Sees N failed payments\nthis month]
+    B --> C[Each row: subscriber · amount · plain-language reason · days · recommended email]
+    C --> D{Marc reviews rows}
+    D -- Single row, agrees --> E[Clicks 'Send recommended' on row]
+    E --> F[Confirmation toast:\n'Email sent to Sophie']
+    D -- Multi-row --> G[Selects 4 rows with similar reasons]
+    G --> H[BatchActionToolbar appears:\n'Send recommended (4)' / 'Send specific…' / 'Mark resolved' / 'Exclude']
+    H --> I[Clicks 'Send recommended (4)']
+    I --> J[Confirmation dialog:\n'Send 4 dunning emails?\nUpdate Payment ×3 · Final Notice ×1']
+    J --> K{Confirms?}
+    K -- Yes --> L['4 emails dispatched' toast]
+    K -- No --> H
+    D -- Wants different type --> M[Clicks 'Send specific…' on row]
+    M --> N[Picks email type:\nUpdate Payment / Retry Reminder / Final Notice]
+    N --> O[Email sent]
+    F --> P{More rows to review?}
+    L --> P
+    O --> P
+    P -- Yes --> D
+    P -- No --> Q([Dashboard zero-state:\n'No failed payments this month.\nYour subscribers are paying — keep shipping.'])
 ```
 
 **UX notes:**
-- Default state: all rows pre-selected with recommended action pre-filled
-- Marc's job is to *review*, not to *configure* — the engine does the thinking
-- Batch toolbar appears only when rows are selected; disappears when none are
-- Exclusion requires a confirmation step — it's irreversible from the queue
-- Zero-state is calm and reassuring, not empty-feeling
+- Each row's recommended email is decided by decline code + days since failure (no global mode)
+- Multi-select preserves per-row recommendations; bulk action sends the right type per row
+- "Send specific…" lets Marc override a single row's recommendation
+- Confirmation dialog summarizes the breakdown by type so Marc can verify before dispatch
+- Zero-state copy is encouraging, not empty-feeling
 
 ---
 
-### Journey 4: End-Customer Notification Flow (Sophie)
+### Journey 4: Manual Resolve
+
+**Goal:** Marc has a failed payment whose subscriber has paid him via wire transfer outside Stripe. He marks the row resolved with a note.
+
+```mermaid
+flowchart TD
+    A([Marc opens dashboard]) --> B[Scans failed-payments list]
+    B --> C[Identifies row: 'Acme Corp — €450 — insufficient_funds']
+    C --> D[Recalls: subscriber emailed\nthat they paid via wire 2 days ago]
+    D --> E[Clicks row context menu]
+    E --> F[Selects 'Mark resolved']
+    F --> G[Resolve dialog:\n'Why is this resolved?'\nNote field — required]
+    G --> H[Marc types: 'Paid via wire 2026-04-28']
+    H --> I{Confirms?}
+    I -- Yes --> J[Row removed from list\nAudit log entry created\nwith timestamp + note]
+    I -- No --> C
+    J --> K([Subscriber status flips to Recovered\nDashboard counts update])
+```
+
+**UX notes:**
+- Manual resolve is for off-Stripe reconciliation; not a substitute for actual payment
+- Note is required — it's the audit trail Marc may need to reference later
+- Row clears from the failed-payments list but persists in the audit log
+- No email is sent on manual resolve — Marc's already in contact with the subscriber
+
+---
+
+### Journey 5: End-Customer Notification Flow (Sophie)
 
 **Goal:** Sophie receives a payment notification, updates her card, and her subscription continues without friction.
 
 ```mermaid
 flowchart TD
-    A([SafeNet detects card_expired failure]) --> B{Opt-out check}
-    B -- Opted out --> C[No notification sent\nEngine logs: opt-out respected]
-    B -- Active --> D[Engine selects template:\n'card_expired' → payment update request]
-    D --> E[Tone applied per Marc's setting:\nProfessional / Friendly / Minimal]
-    E --> F[Email sent from Marc's sender domain\nSubject: 'Quick heads up about your payment']
+    A([Marc clicks 'Send recommended' on Sophie's row]) --> B{Opt-out check}
+    B -- Opted out --> C[No email sent\nRow shows opt-out badge]
+    B -- Active --> D[Service selects template:\nrecommended type → 'Update Payment']
+    D --> E[Tone applied per Marc's setting:\nProfessional / Friendly / Minimal\n(or Marc's custom body — paid tier)]
+    E --> F[Email sent via Resend from Marc's sender\nSubject: 'Quick heads up about your payment']
     F --> G([Sophie receives email])
     G --> H{Sophie opens email?}
-    H -- No, ignores --> I[Follow-up schedule:\nDay 3 · Day 7 if no update]
-    H -- Yes --> J[Reads: card expired · single CTA\n'Update your payment method']
+    H -- No, ignores --> I[Marc may send retry_reminder\nlater in the week]
+    H -- Yes --> J[Reads: card expired · single CTA\nMarc's redirect link to his payment update page]
     J --> K{Clicks update link?}
     K -- No --> I
-    K -- Yes --> L[Stripe customer portal\nMarc's branding]
-    L --> M{Card updated?}
+    K -- Yes --> L[Marc's payment update flow\nMarc handles card update]
+    L --> M{Card updated and next charge succeeds?}
     M -- No, abandons --> I
-    M -- Yes --> N[Next hourly poll detects card update]
-    N --> O[Retry queued immediately]
-    O --> P{Retry succeeds?}
-    P -- No --> Q[Decline code re-evaluated\nNew recovery path assigned]
-    P -- Yes --> R[Recovery confirmation email sent to Sophie:\n'All sorted — payment confirmed.']
-    R --> S[Marc's dashboard updated:\nSophie → Recovered]
-    S --> T([Marc receives passive notification\nif digest enabled])
-    I --> U{Retry cap reached?}
-    U -- No --> D
-    U -- Yes --> V[Status → Passive Churn\nFinal notice email sent]
-    V --> W([Case closed · Audit log updated])
+    M -- Yes --> N[Daily poll detects PI now succeeded]
+    N --> R[Recovery confirmation email sent to Sophie:\n'All sorted — payment confirmed.']
+    R --> S[Marc's dashboard:\nSophie → Recovered]
+    S --> T([Row clears from failed-payments list])
 ```
 
 **UX notes (Sophie-facing):**
@@ -816,10 +834,10 @@ flowchart TD
 |-----------|----------|
 | `Button` | All CTAs — primary (near-black/near-white), ghost, destructive |
 | `Input` / `Textarea` | Search, note field in fraud resolution, DPA form |
-| `Dialog` | DPA presentation, exclusion confirmation, mode selection |
+| `Dialog` | DPA presentation, exclusion confirmation, bulk-send confirmation |
 | `Sheet` | Subscriber detail panel (slides in from right) |
-| `Table` | Subscriber list in Supervised review queue |
-| `Checkbox` | Batch row selection in review queue |
+| `Table` | Failed-payments list rows |
+| `Checkbox` | Batch row selection on failed-payments list |
 | `Toast` | Action confirmations ("3 actions queued"), recovery notifications |
 | `Badge` | Base component for status variants |
 | `Separator` | Section dividers in detail panels |
@@ -879,31 +897,31 @@ flowchart TD
 **Anatomy:**
 - Icon: amber warning square (left)
 - Title: "N items need your attention" (bold, dark amber)
-- Subtitle: "Review before next engine cycle in Xm" (lighter amber)
+- Subtitle: "Review before they age into final notices" (lighter amber)
 - Action pills: named items as clickable chips (one per attention item)
 
 **States:** Visible (1+ items) · Hidden (zero items) · Urgent (fraud flag present — slightly deeper amber)
 
-**Behaviour:** Clicking a pill navigates to the relevant subscriber detail or review queue. Dismissible per session (not permanently).
+**Behaviour:** Clicking a pill navigates to the relevant subscriber detail or scrolls to the row in the failed-payments list. Dismissible per session (not permanently).
 
 **Accessibility:** `role="alert"` with `aria-live="polite"` · Pills are `<button>` elements with full keyboard navigation
 
 ---
 
-#### `EngineStatusIndicator`
+#### `PollingStatusIndicator`
 
-**Purpose:** Ambient always-visible signal that the engine is running. Never obtrusive; immediately reassuring on return visits.
+**Purpose:** Ambient always-visible signal that daily polling is running. Never obtrusive; immediately reassuring on return visits.
 
 **Anatomy:**
-- Animated pulse dot (blue when active, grey when paused)
-- Status text: "Autopilot active" or "Supervised" or "Paused"
-- Sub-text: "Last scan Xm ago · next in Ym"
+- Animated pulse dot (blue when polling on schedule, amber when overdue >30h)
+- Status text: "Polling active" or "Polling overdue"
+- Sub-text: "Last poll Xh ago · next in Yh"
 
 **Placement:** Top navigation bar (right of workspace identity, left of user menu) on all authenticated screens.
 
-**States:** Active (blue pulse) · Paused (grey, static) · Error (amber, static — engine failed to run)
+**States:** Active (blue pulse) · Overdue (amber, static — polling has not run in >30h) · Error (red, static — last poll failed)
 
-**Accessibility:** `aria-label="Engine status: Autopilot active, last scan 18 minutes ago"` · Status changes announced via `aria-live="polite"`
+**Accessibility:** `aria-label="Polling status: active, last poll 6 hours ago"` · Status changes announced via `aria-live="polite"`
 
 ---
 
@@ -934,27 +952,28 @@ flowchart TD
 - Explanation popover (on hover/focus): one sentence explaining what this means and what SafeNet will do
 
 **Examples:**
-- `card_expired` → "Card expired" → "This card is no longer valid. SafeNet has sent a payment update request to your subscriber."
-- `insufficient_funds` → "Insufficient funds" → "Your subscriber's account didn't have enough funds. SafeNet will retry after the next likely payday."
-- `fraudulent` → "Fraud flagged" → "The card issuer flagged this as a potential fraud event. SafeNet has stopped all automated actions."
+- `card_expired` → "Card expired" → "This card is no longer valid. SafeNet recommends sending an Update Payment email."
+- `insufficient_funds` → "Insufficient funds" → "Your subscriber's account didn't have enough funds. SafeNet recommends an Update Payment email; consider waiting a few days before sending."
+- `fraudulent` → "Fraud flagged" → "The card issuer flagged this as a potential fraud event. SafeNet recommends no email — review the case manually."
 
-**Used in:** Subscriber list rows · Detail panel · StoryArcPanel breakdown · Review queue
+**Used in:** Subscriber list rows · Detail panel · StoryArcPanel breakdown · Failed-payments list
 
 ---
 
 #### `BatchActionToolbar`
 
-**Purpose:** Appears when rows are selected in the Supervised review queue. Provides Marc with one-click bulk actions without cognitive overhead.
+**Purpose:** Appears when rows are selected in the failed-payments list. Provides Marc with one-click bulk actions without cognitive overhead.
 
 **Anatomy:**
 - Selection count: "N subscribers selected"
-- Primary action button: "Apply recommended actions" (near-black CTA)
-- Secondary action: "Exclude from automation" (ghost/destructive variant)
+- Primary action button: "Send recommended (N)" (near-black CTA)
+- Secondary action: "Send specific…" (opens email-type picker)
+- Tertiary actions: "Mark resolved (N)" · "Exclude (N)"
 - Deselect all link
 
 **States:** Hidden (no selection) · Visible (1+ selected) · Partial selection indicator
 
-**Behaviour:** Slides up from bottom of queue on selection. Sticky within the queue viewport. Disappears on deselect-all.
+**Behaviour:** Slides up from bottom of list on selection. Sticky within the list viewport. Disappears on deselect-all.
 
 **Accessibility:** `role="toolbar"` · All buttons keyboard-accessible · Selection count announced via `aria-live`
 
@@ -977,7 +996,7 @@ flowchart TD
 
 - All custom components are built using shadcn/ui primitives and Tailwind utility classes
 - SafeNet design tokens applied via CSS custom properties — components automatically adapt to light/dark mode
-- Components are co-located with their feature area (e.g. `AttentionBar` in `/components/dashboard/`, `BatchActionToolbar` in `/components/review/`)
+- Components are co-located with their feature area (e.g. `AttentionBar` in `/components/dashboard/`, `BatchActionToolbar` in `/components/dashboard/`, `RedirectLinkInput` + `CustomBodyEditor` in `/components/settings/`)
 - `DeclineCodeExplainer` is a shared utility component, living in `/components/common/`
 
 ### Implementation Roadmap
@@ -987,20 +1006,24 @@ flowchart TD
 | Component | Needed for |
 |-----------|-----------|
 | `WorkspaceIdentity` | All authenticated screens |
-| `EngineStatusIndicator` | All authenticated screens |
+| `PollingStatusIndicator` | All authenticated screens |
 | `RecoveryHeroCard` | Dashboard |
 | `StoryArcPanel` | Dashboard |
 | `AttentionBar` | Dashboard |
-| `SubscriberCard` | Dashboard subscriber grid |
+| `FailedPaymentsList` | Dashboard |
+| `PerRowActionMenu` | Failed-payments list rows |
+| `SubscriberCard` | Subscriber detail panel |
 | `DeclineCodeExplainer` | Dashboard + detail panel |
+| `RedirectLinkInput` | Settings |
 
-**Phase 2 — Review queue & detail**
+**Phase 2 — Bulk actions & detail**
 
 | Component | Needed for |
 |-----------|-----------|
-| `BatchActionToolbar` | Supervised review queue |
+| `BatchActionToolbar` | Failed-payments list multi-select |
 | Extended `Badge` variants | All status displays |
 | Extended `Sheet` | Subscriber detail panel |
+| `CustomBodyEditor` | Settings (paid tier) |
 
 **Phase 3 — Polish & edge cases**
 
@@ -1029,7 +1052,7 @@ Every screen enforces a strict CTA pyramid — at most **one Primary per viewpor
 **Rules:**
 - One Primary button per screen — never two filled CTAs competing.
 - Destructive actions always require a confirmation dialog; never a single tap.
-- Batch action bar (Supervised mode) uses a single Primary ("Apply to selected") — all individual row actions are Ghost until batch is cleared.
+- Batch action bar uses a single Primary ("Send recommended (N)") — all individual row actions are Ghost until batch is cleared.
 
 ---
 
@@ -1061,7 +1084,7 @@ All zero-states use affirming, forward-looking language. SafeNet must feel helpf
 | Screen | Zero Condition | Heading | Sub-copy | CTA |
 |--------|---------------|---------|---------|-----|
 | Dashboard | No failures detected | "You're all clear." | "SafeNet is watching. We'll surface anything that needs attention." | — |
-| Review Queue | No items to review | "Nothing needs your eyes right now." | "Approved items and automated recoveries are handled." | — |
+| Failed-payments list | No failures this month | "No failed payments this month." | "Your subscribers are paying — keep shipping." | — |
 | Recovered | No recoveries yet | "Your first recovery is coming." | "SafeNet has started scanning. Results appear here." | "View activity →" |
 | Settings | First load, no Stripe connected | "Connect Stripe to activate SafeNet." | "Takes 30 seconds. Read-only access." | "Connect Stripe" (Primary) |
 
@@ -1071,7 +1094,7 @@ All zero-states use affirming, forward-looking language. SafeNet must feel helpf
 
 | Pattern | When to use | Dismiss |
 |---------|------------|---------|
-| **Dialog** (centred modal) | Destructive confirmations, fraud flag, mode switch warning | Explicit "Cancel" or "Confirm" — no backdrop click dismiss for destructive |
+| **Dialog** (centred modal) | Destructive confirmations, fraud flag, bulk-send confirmation | Explicit "Cancel" or "Confirm" — no backdrop click dismiss for destructive |
 | **Sheet** (right-side drawer) | Subscriber detail panel, notification preview | Backdrop click, swipe, or explicit close — non-destructive |
 | **Popover** | Decline code tooltip, quick status explanation | Auto-dismiss on blur |
 | **Toast** | See §12.2 | Auto or manual |
@@ -1087,7 +1110,7 @@ All zero-states use affirming, forward-looking language. SafeNet must feel helpf
 - Active tab: full-weight label + 2 px bottom border in brand colour. No icon-only tabs on desktop.
 - Inactive tabs: muted `text-muted-foreground`, no border.
 - WorkspaceIdentity (logo + SaaS name) is always left-anchored and non-interactive in the topbar.
-- Engine status indicator (Autopilot / Supervised pill) is always right-anchored in topbar.
+- Polling status indicator (last poll · next poll) is always right-anchored in topbar.
 
 #### Sheet vs Page Navigation
 
@@ -1136,7 +1159,7 @@ Four and only four subscriber status variants. No ad-hoc colours outside this ta
 
 - All settings fields auto-save on change or blur — no "Save" page button.
 - Destructive settings (delete rule, remove Stripe) use a separate confirm step inline.
-- Toggle switches for mode (Autopilot/Supervised) are large (40 px track) and labelled both states.
+- No global mode toggle — Marc's controls are per row. Settings toggles (e.g. tone preset, redirect link, custom body editor) are large (40 px) where they apply.
 
 ---
 
@@ -1147,7 +1170,7 @@ Four and only four subscriber status variants. No ad-hoc colours outside this ta
 Used on initial page load and Stripe sync. Skeleton elements mirror the exact shape of loaded content:
 
 - Dashboard: 3 KPI card skeletons (full width, 80 px height) + 6 SubscriberCard skeletons in grid.
-- Review Queue: 5 row skeletons with badge placeholder.
+- Failed-payments list: 5 row skeletons with badge placeholder.
 - Recovered: chart area skeleton + 4 row skeletons.
 
 #### Button Spinners

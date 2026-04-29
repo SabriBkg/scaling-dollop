@@ -27,32 +27,32 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 | Domain | FR Count | Architectural weight |
 |--------|---------|---------------------|
-| Account & Onboarding | 6 (FR1–5, FR48) | Stripe Connect OAuth, DPA gate, mode selection |
-| Payment Failure Detection | 4 (FR6–9) | Hourly polling loop, decline-code classification |
-| Recovery Engine | 7 (FR10–15, FR47) | Rule engine, payday calendar, geo-compliance, state transitions |
-| Customer Status Management | 7 (FR16–21, FR46) | 4-state machine, transition guards, subscription cancellation detection |
-| Notifications | 7 (FR22–28) | Transactional email, tone presets, opt-out suppression, two-domain mode |
-| Dashboard & Analytics | 6 (FR29–34) | Retroactive scan, failure breakdown, MoM analytics, digest email |
+| Account & Onboarding | 5 (FR1–3, FR48, FR49) | Stripe Connect OAuth, DPA gate (gates email sending) |
+| Payment Failure Detection | 4 (FR6–9) | Daily polling loop, decline-code classification |
+| Failed-Payments Dashboard & Email Actions | 6 (FR10, FR52–55, FR16) | Recommended-email rule engine; per-row + bulk send; manual resolve; status display |
+| Customer Status Management | 5 (FR16–21, FR46) | 4-state status (display + polling-detected transitions + manual resolve), no FSM auto-on-retry |
+| Notifications | 9 (FR22–28, FR51, FR56) | Transactional email, tone presets, redirect-link, custom-body editor (paid), opt-out suppression, two-domain mode |
+| Dashboard & Analytics | 5 (FR29, FR30, FR33, FR34, FR52) | Retroactive scan, failure breakdown, current-month list, digest email |
 | Subscription & Billing | 5 (FR35–39) | Trial mechanics, tier degradation, Stripe Billing self-management |
-| Operator Administration | 6 (FR40–45) | Admin override panel, audit trail, operator-only access |
+| Operator Administration | 4 (FR42–45) | Audit trail, operator-only access, manual status advancement |
 
-The recovery engine and operator administration domains carry the highest architectural weight — they require the most careful separation, security enforcement, and audit instrumentation.
+The notifications and dashboard domains carry the highest architectural weight in v1 — they require the most careful separation, security enforcement, and audit instrumentation.
 
 **Non-Functional Requirements — 18 NFRs driving structural decisions:**
 
 | Category | Count | Key constraint |
 |----------|-------|---------------|
 | Security | 6 | AES-256 token encryption + env-key separation; zero cardholder data; tenant isolation at query level |
-| Reliability | 5 | Hourly poll ±5 min tolerance; 90-min alert on missed cycle; zero silent failures; dead-letter required |
+| Reliability | 5 | Daily poll ±2h tolerance; 30h alert on missed cycle; zero silent failures; dead-letter required |
 | Performance | 4 | Dashboard ≤3s at 500 customers; retroactive scan non-blocking; first scan visible ≤5 min |
 | Scalability | 3 | 100 client accounts MVP; 10,000 events/client/cycle; multi-user expansion without schema migration |
 | Data Retention | 3 | Events: 24-month purge; Audit logs: 36-month retention; customer emails: purged 30 days post-Passive Churn |
 
 **From UX Specification — architectural implications:**
 
-- **No real-time requirement**: All data is polling-driven (hourly). Dashboard reflects last-known state — no WebSockets needed at MVP. Status updates visible on next page load/refresh.
+- **No real-time requirement**: All data is polling-driven (daily). Dashboard reflects last-known state — no WebSockets needed at MVP. Status updates visible on next page load/refresh.
 - **Subscriber detail Sheet**: API must serve complete subscriber history + audit trail in a single endpoint for right-panel load.
-- **Batch action (Supervised mode)**: API needs a bulk-action endpoint — partial batch failure must be surfaced cleanly.
+- **Batch send action**: API needs a bulk-send endpoint at `/api/v1/subscribers/batch-send-email/` — partial batch failure must be surfaced cleanly per-row.
 - **AttentionBar**: A lightweight aggregated summary endpoint required for topbar badge/bar (not the full subscriber list).
 - **WCAG AA + skeleton loading**: API responses must be structured predictably — known field shapes required even on empty states.
 - **Desktop-first React (Next.js) frontend**: Confirmed via both PRD and UX spec. No mobile-native requirements.
@@ -75,7 +75,7 @@ The PRD explicitly specifies the full technical stack:
 |-------|-----------|-------|
 | Backend | Python + Django | Django admin = operator panel. No custom admin UI in scope. |
 | Frontend | Next.js | Dashboard only. No mobile-native app. |
-| Job scheduler | Celery + Redis | Hourly polling + retry execution. |
+| Job scheduler | Celery + Redis | Daily polling + email send dispatch. |
 | Database | PostgreSQL | ACID compliance for financial event metadata. |
 | Deployment | Railway | Encrypted env secrets for AES-256 key. Zero DevOps. |
 | Local dev | Docker Compose | One-command environment. Must mirror production. |
@@ -95,11 +95,11 @@ Six concerns that span every subsystem:
 
 2. **Tenant isolation:** All database queries scoped by `account_id`. No global queries anywhere in the application layer. Affects: every model, every view, every API endpoint.
 
-3. **Compliance gates:** DPA acknowledgement required before engine activation (hard gate). Opt-out state checked before every notification. EU/UK payment context checked before every retry. Affects: Onboarding, Notification Service, Recovery Engine.
+3. **Compliance gates:** DPA acknowledgement required before any dunning email is sent (hard gate). Opt-out state checked before every email send. Geo-context (SEPA/UK direct-debit) surfaced as a row warning on the failed-payments dashboard for SEPA/UK direct-debit failures (informational; no automated action). Affects: Onboarding, Notification Service, Failed-Payments Dashboard.
 
-4. **Tier gating:** Feature access varies across Free/Mid/Pro + trial state. Polling frequency, engine activation, notification sending, and Pro features all require tier checks. Affects: every user-facing feature.
+4. **Tier gating:** Feature access varies across Free/Mid/Pro + trial state. Polling frequency, email sending capability (DPA + Mid required), custom email body editor (paid required), and Pro features all require tier checks. Affects: every user-facing feature.
 
-5. **Reliability & observability:** Dead-letter queue on all Celery jobs. Polling health monitoring with 90-minute alert threshold. Zero silent failures — every failure logged. Affects: Celery workers, polling job, retry scheduler.
+5. **Reliability & observability:** Dead-letter queue on all Celery jobs (polling, email send). Polling health monitoring with 30-hour alert threshold (daily cadence). Zero silent failures — every failure logged. Affects: Celery workers, polling job, email dispatcher.
 
 6. **Security boundary:** Operator console strictly separated from client console. No client-facing route exposes operator capabilities. Affects: URL routing, authentication middleware, Django admin configuration.
 
@@ -172,9 +172,9 @@ python manage.py startapp core
 
 **What this establishes:**
 
-- **Django admin** = operator override panel. Zero custom admin UI needed at MVP. All operator capabilities (retry override, status advancement, audit log review) are Django admin views.
+- **Django admin** = operator panel. Zero custom admin UI needed at MVP. All operator capabilities (manual status advancement, audit log review, email-send-history inspection) are Django admin views.
 - **DRF** = REST API consumed by the Next.js dashboard. JSON responses, token authentication.
-- **Celery + Redis** = job queue for hourly polling and scheduled retries. Worker runs alongside Django.
+- **Celery + Redis** = job queue for daily polling and email send dispatch. Worker runs alongside Django.
 - **django-environ** = environment variable management. AES-256 encryption key loaded exclusively from env — never committed, never in the database.
 
 ---
@@ -194,7 +194,7 @@ services:
   frontend:  Next.js dev server
 ```
 
-**Note:** `celery beat` (scheduler) is a distinct process from `celery worker`. Beat triggers the hourly polling tick; workers execute the tasks. Both must run locally to test the full engine cycle.
+**Note:** `celery beat` (scheduler) is a distinct process from `celery worker`. Beat triggers the daily polling tick; workers execute the polling task and email-send dispatch tasks. Both must run locally to test the full cycle.
 
 ---
 
@@ -230,25 +230,27 @@ services:
 All Django models inherit from a `TenantScopedModel` abstract base class with a required `account` FK. A custom `TenantManager` replaces the default manager — `Model.objects.all()` is never callable without `account_id` scoping. Global queries require an explicit `unscoped()` manager available only in admin/operator context. Isolation enforced by architecture, not discipline.
 
 **State machine:**
-`django-fsm` for the 4-state customer state machine (Active → Recovered / Passive Churn / Fraud Flagged). Transitions are decorated methods with guards — `TransitionNotAllowed` raised on invalid transitions, never silently ignored. Every transition logs to the audit trail automatically via a post-transition signal.
+`django-fsm` for the 4-state customer state machine (Active → Recovered / Passive Churn / Fraud Flagged). In v1, transitions are triggered by daily polling detection (paid → Recovered; cancelled/unpaid/paused → Passive Churn) and by client manual action (mark resolved / exclude / fraud resolution); the v0 retry-outcome auto-transitions are quarantined to the `archive/v0-recovery-engine` branch. Transitions are decorated methods with guards — `TransitionNotAllowed` raised on invalid transitions, never silently ignored. Every transition logs to the audit trail automatically via a post-transition signal.
 
 **Caching:**
 Redis (already present for Celery) used as Django cache backend via `django-redis`. Dashboard summary endpoint (KPI aggregates) cached with 5-minute TTL, invalidated on any new engine action for that account. Individual subscriber data never cached — must always reflect current state.
 
 **Decline-code rule engine:**
-Data-driven: rules defined in a Python dict/YAML config file, not hardcoded in business logic:
+Data-driven: rules defined in a Python dict/YAML config file, not hardcoded in business logic. v1 vocabulary: `recommended_email` (one of `update_payment` / `retry_reminder` / `final_notice` / `None`) plus `fraud_flag` and `geo_warning` flags. The v0 fields (`retry_cap`, `payday_aware`, `geo_block`) are retained in the config but unused in v1 — kept so the v2 quarantine branch can reactivate them without re-derivation.
+
 ```python
 # Structure: decline_code → rule
 DECLINE_RULES = {
-    "card_expired":           {"action": "notify_only", "retry_cap": 0, "payday_aware": False, "geo_block": False},
-    "insufficient_funds":     {"action": "retry_notify", "retry_cap": 3, "payday_aware": True,  "geo_block": True},
-    "fraudulent":             {"action": "fraud_flag",   "retry_cap": 0, "payday_aware": False, "geo_block": False},
-    "do_not_honor":           {"action": "retry_notify", "retry_cap": 2, "payday_aware": False, "geo_block": True},
-    # ... 30+ codes
-    "_default":               {"action": "retry_notify", "retry_cap": 1, "payday_aware": False, "geo_block": False},
+    "card_expired":           {"recommended_email": "update_payment",  "fraud_flag": False},
+    "insufficient_funds":     {"recommended_email": "update_payment",  "fraud_flag": False, "geo_warning": True},
+    "fraudulent":             {"recommended_email": None,              "fraud_flag": True},
+    "do_not_honor":           {"recommended_email": "update_payment",  "fraud_flag": False, "geo_warning": True},
+    "card_velocity_exceeded": {"recommended_email": "update_payment",  "fraud_flag": False},
+    # ... 30+ codes total ...
+    "_default":               {"recommended_email": "update_payment",  "fraud_flag": False},
 }
 ```
-Unknown codes fall through to `_default` — conservative, never fraud-flags. Config is version-controlled and fully testable with pytest, no DB required.
+Unknown codes fall through to `_default` — conservative, never fraud-flags. The recommended_email is escalated by time-since-failure (day 0–6 = update_payment, day 7–13 = retry_reminder, day 14+ = final_notice) — applied at serialization time, not in `DECLINE_RULES` itself, so the config remains time-agnostic. Config is version-controlled and fully testable with pytest, no DB required.
 
 ---
 
@@ -295,7 +297,8 @@ Only the `StripeConnection` model uses these helpers. No other code in the codeb
 | `/api/v1/dashboard/summary/` | GET | Aggregated KPIs + attention count (cached, 5 min) |
 | `/api/v1/stripe/connect/` | POST | Initiate OAuth flow |
 | `/api/v1/stripe/disconnect/` | POST | Revoke token, stop engine |
-| `/api/v1/actions/batch/` | POST | Batch action for Supervised mode |
+| `/api/v1/subscribers/{id}/send-email/` | POST | Trigger a per-row dunning email send (recommended or chosen type) |
+| `/api/v1/subscribers/batch-send-email/` | POST | Bulk-send dunning emails for selected rows; partial-failure surfaced per-row |
 | `/api/v1/subscribers/{id}/timeline/` | GET | Full audit trail for detail Sheet |
 
 **Error format:**
@@ -312,7 +315,7 @@ Never raw Django 500 HTML. Consumed by Next.js error boundaries.
 
 **Server state:** TanStack Query (React Query v5) — caching, background refetch, stale-while-revalidate, loading/error states. Dashboard `refetchInterval: 5 * 60 * 1000` (5 min), manual refresh available.
 
-**Client state:** Zustand — active sheet subscriber ID, batch selection set, theme preference, supervised/autopilot UI state.
+**Client state:** Zustand — active sheet subscriber ID, batch selection set, theme preference, dashboard filter/sort state.
 
 **API client:** axios with configured instance — base URL from env, JWT injected via request interceptor, 401 triggers token refresh then retries original request.
 
@@ -452,13 +455,18 @@ backend/
       dashboard.py
       stripe.py
     tasks/               # Celery tasks
-      polling.py         # Hourly polling job
-      retry.py           # Retry execution
-      notifications.py   # Email dispatch
+      polling.py         # Daily polling job (failures + recovery + cancellation)
+      notifications.py   # Email dispatch (client-triggered + recovery confirmation)
+      # retry.py — quarantined to archive/v0-recovery-engine
     engine/              # Rule engine — pure Python, zero Django imports
-      rules.py           # DECLINE_RULES config dict
-      processor.py       # Rule application logic
-      compliance.py      # Geo-aware compliance checks
+      rules.py           # DECLINE_RULES config dict (v1: recommended_email vocabulary)
+      processor.py       # Returns recommended_email_type per failure
+      # payday.py, compliance.py — quarantined to archive/v0-recovery-engine
+    services/
+      email.py           # Email rendering + Resend dispatch
+      email_recommendations.py  # Time-since-failure escalation logic
+    views/
+      email_dispatch.py  # Per-row + batch send endpoints
     admin/               # Django admin customizations
     tests/
       test_engine/
@@ -645,51 +653,52 @@ safenet/                              # Monorepo root
 │   │   │   ├── subscribers.py        # Subscriber list, detail, status
 │   │   │   ├── dashboard.py          # Summary KPIs, story arc data
 │   │   │   ├── stripe.py             # Connect / disconnect OAuth
-│   │   │   └── actions.py            # Batch actions (Supervised mode)
+│   │   │   └── email_dispatch.py     # Per-row + batch send endpoints
+│   │   │   # actions.py — quarantined to archive/v0-recovery-engine
 │   │   ├── tasks/                    # Celery tasks
 │   │   │   ├── __init__.py
-│   │   │   ├── polling.py            # Hourly polling job
-│   │   │   ├── retry.py              # Retry execution
-│   │   │   ├── notifications.py      # Resend email dispatch
+│   │   │   ├── polling.py            # Daily polling job (failures + recovery + cancellation)
+│   │   │   ├── notifications.py      # Resend email dispatch (client-triggered + recovery confirmation)
 │   │   │   ├── scanner.py            # 90-day retroactive scan
 │   │   │   └── maintenance.py        # Data retention + purge jobs
+│   │   │   # retry.py — quarantined to archive/v0-recovery-engine
 │   │   ├── engine/                   # Rule engine — pure Python, zero Django imports
 │   │   │   ├── __init__.py
-│   │   │   ├── rules.py              # DECLINE_RULES config dict (30+ codes)
-│   │   │   ├── processor.py          # Apply rule to a SubscriberFailure
-│   │   │   ├── compliance.py         # EU/UK geo-aware retry blocking
-│   │   │   ├── payday.py             # Payday calendar logic
-│   │   │   └── state_machine.py      # FSM helper utilities
+│   │   │   ├── rules.py              # DECLINE_RULES config dict (v1: recommended_email vocabulary)
+│   │   │   ├── processor.py          # Returns recommended_email_type + flags per failure
+│   │   │   └── state_machine.py      # FSM helper utilities (status display + polling-detected transitions)
+│   │   │   # compliance.py, payday.py — quarantined to archive/v0-recovery-engine
 │   │   ├── services/                 # Orchestration layer
 │   │   │   ├── __init__.py
 │   │   │   ├── audit.py              # write_audit_event() helper
 │   │   │   ├── stripe_client.py      # Stripe API wrapper (read + retry)
 │   │   │   ├── email.py              # Resend integration
+│   │   │   ├── email_recommendations.py  # Time-since-failure escalation logic
 │   │   │   ├── encryption.py         # encrypt_token / decrypt_token
 │   │   │   └── tier.py               # Tier + trial gate checks
 │   │   ├── admin/                    # Django admin = operator panel
 │   │   │   ├── __init__.py
 │   │   │   ├── account.py
 │   │   │   ├── subscriber.py
-│   │   │   ├── audit.py
-│   │   │   └── retry_queue.py        # Scheduled retry oversight view
+│   │   │   └── audit.py
+│   │   │   # retry_queue.py — quarantined to archive/v0-recovery-engine
 │   │   └── migrations/
 │   ├── tests/
 │   │   ├── conftest.py               # pytest fixtures
 │   │   ├── test_engine/
-│   │   │   ├── test_rules.py
-│   │   │   ├── test_compliance.py
-│   │   │   └── test_payday.py
+│   │   │   └── test_rules.py
+│   │   │   # test_compliance.py, test_payday.py — quarantined
 │   │   ├── test_api/
 │   │   │   ├── test_auth.py
 │   │   │   ├── test_subscribers.py
 │   │   │   ├── test_dashboard.py
 │   │   │   ├── test_stripe.py
-│   │   │   └── test_batch.py
+│   │   │   └── test_email_dispatch.py
+│   │   │   # test_batch.py (Supervised batch-approve) — quarantined
 │   │   └── test_tasks/
 │   │       ├── test_polling.py
-│   │       ├── test_retry.py
 │   │       └── test_scanner.py
+│   │       # test_retry.py — quarantined
 │   ├── manage.py
 │   ├── requirements.txt
 │   ├── requirements-dev.txt
@@ -734,9 +743,11 @@ safenet/                              # Monorepo root
 │   │   │   ├── settings/
 │   │   │   │   ├── ToneSelector.tsx
 │   │   │   │   ├── DPAGate.tsx
+│   │   │   │   ├── RedirectLinkInput.tsx
+│   │   │   │   ├── CustomBodyEditor.tsx     # paid-tier only
 │   │   │   │   ├── StripeConnectionCard.tsx
-│   │   │   │   ├── ModeToggle.tsx
 │   │   │   │   └── DangerZone.tsx
+│   │   │   │   # ModeToggle.tsx — quarantined to archive/v0-recovery-engine
 │   │   │   └── onboarding/
 │   │   │       ├── ConnectStripe.tsx
 │   │   │       ├── ScanProgress.tsx
@@ -804,7 +815,9 @@ safenet/                              # Monorepo root
 | `/api/v1/*` | ✅ JWT auth | ✅ JWT auth |
 | `/ops-console/*` | ❌ `is_staff` blocks | ✅ Django admin |
 | Audit log read | ❌ Not exposed | ✅ Admin + API |
-| Retry override | ❌ Not available | ✅ Admin only |
+| Email send capability | ❌ View-only on Free | ✅ Mid+ with DPA accepted |
+| Custom email body editor | ❌ Free | ✅ Mid+ paid only |
+| Manual status advancement | ❌ Not available | ✅ Admin only |
 
 **Engine isolation:** `core/engine/` contains zero Django imports. Pure Python. Fully testable without a database. Extractable to a separate service without rewrites.
 
@@ -815,13 +828,16 @@ safenet/                              # Monorepo root
 | FR Group | Backend files | Frontend files |
 |----------|-------------|---------------|
 | FR1–5, FR48 — Onboarding | `views/account.py`, `views/stripe.py`, `tasks/scanner.py`, `services/encryption.py` | `onboarding/`, `settings/StripeConnectionCard.tsx`, `hooks/useStripeConnect.ts` |
-| FR6–9 — Failure Detection | `tasks/polling.py`, `engine/processor.py`, `engine/rules.py` | `dashboard/KPICard.tsx`, `hooks/useDashboardSummary.ts` |
-| FR10–15, FR47 — Recovery Engine | `engine/rules.py`, `engine/compliance.py`, `engine/payday.py`, `tasks/retry.py` | Backend-only |
+| FR6–9 — Failure Detection (daily) | `tasks/polling.py`, `engine/processor.py`, `engine/rules.py` | `dashboard/KPICard.tsx`, `hooks/useDashboardSummary.ts` |
+| FR10 — Recommended-Email Mapping | `engine/rules.py`, `engine/email_recommendations.py` | Backend-only (surfaces via FR53/54) |
 | FR16–21, FR46 — Status Management | `models/subscriber.py` (FSM), `views/subscribers.py`, `services/audit.py` | `dashboard/SubscriberCard.tsx`, `subscriber/SubscriberDetailSheet.tsx` |
 | FR22–28 — Notifications | `tasks/notifications.py`, `services/email.py`, `models/notification.py` | `settings/ToneSelector.tsx` |
 | FR29–34 — Dashboard | `views/dashboard.py`, `serializers/dashboard.py` | `dashboard/StoryArcPanel.tsx`, `hooks/useDashboardSummary.ts` |
 | FR35–39 — Billing | `services/tier.py`, Stripe Billing webhook | `settings/StripeConnectionCard.tsx` |
-| FR40–45 — Operator Admin | `admin/retry_queue.py`, `admin/audit.py`, `admin/subscriber.py` | Django admin only |
+| FR42–45 — Operator Admin | `admin/audit.py`, `admin/subscriber.py` | Django admin only |
+| FR51 — Redirect Link | `views/account.py` (settings field), `models/account.py` | `settings/RedirectLinkInput.tsx` |
+| FR52–55 — Failed-Payments Dashboard | `views/dashboard.py`, `views/email_dispatch.py`, `views/subscribers.py` | `dashboard/FailedPaymentsList.tsx`, `dashboard/PerRowActionMenu.tsx`, `dashboard/BulkSendBar.tsx` |
+| FR56 — Custom Email Body | `views/account.py`, `models/account.py` (paid-tier fields), `services/email.py` (template selection) | `settings/CustomBodyEditor.tsx` |
 
 **Cross-cutting concerns:**
 
@@ -831,7 +847,7 @@ safenet/                              # Monorepo root
 | Audit trail | `services/audit.py` → `write_audit_event()` |
 | Token encryption | `services/encryption.py` |
 | Tier gating | `services/tier.py` |
-| Compliance gate | `engine/compliance.py` |
+| DPA gate (pre-email) | `views/email_dispatch.py` (checks `Account.dpa_accepted_at`) |
 | JWT middleware | `frontend/src/middleware.ts` |
 
 ---
@@ -848,16 +864,27 @@ User clicks "Connect" →
   tasks/scanner.py (90-day scan queued in Celery)
 ```
 
-**Hourly polling:**
+**Daily polling:**
 ```
-celery beat (every 60 min) →
+celery beat (every 24h ±2h, alert if >30h) →
   tasks/polling.py (per active account) →
-  services/stripe_client.py (fetch failures) →
-  engine/processor.py (classify + rule) →
-  engine/compliance.py (geo check) →
-  models/subscriber.py (FSM transition) →
+  services/stripe_client.py (fetch failures + recovery signals) →
+  engine/processor.py (classify decline_code → recommended_email_type) →
+  models/subscriber.py (upsert SubscriberFailure rows; mark_passive_churn or mark_recovered on state change) →
   services/audit.py (write_audit_event) →
-  tasks/retry.py or tasks/notifications.py (queued)
+  tasks/notifications.send_recovery_confirmation (if newly recovered)
+```
+
+**Client-initiated email send (per-row or bulk):**
+```
+Marc clicks "Send recommended" / bulk select →
+  views/email_dispatch.py (POST /failures/{id}/send-email/ or /failures/batch-send-email/) →
+  DPA gate check (Account.dpa_accepted_at) →
+  opt-out check (NotificationSuppression) →
+  tier check (services/tier.py) →
+  tasks/notifications.send_dunning_email (Resend) →
+  models/notification.NotificationLog (audit) →
+  services/audit.py (write_audit_event)
 ```
 
 **Dashboard load:**
@@ -887,18 +914,21 @@ celery beat (every 60 min) →
 
 ### Requirements Coverage Validation ✅
 
-**All 48 FRs architecturally supported:**
+**All v1 FRs architecturally supported** (FR4, FR5, FR11–15, FR40, FR41, FR47 retired/quarantined; FR51–56 added):
 
 | FR Group | Status | Primary files |
 |----------|--------|--------------|
-| FR1–5, FR48 — Onboarding | ✅ | `views/stripe.py`, `tasks/scanner.py`, `services/encryption.py` |
-| FR6–9 — Failure Detection | ✅ | `tasks/polling.py`, `engine/processor.py` |
-| FR10–15, FR47 — Recovery Engine | ✅ | `engine/rules.py`, `engine/compliance.py`, `engine/payday.py`, `tasks/retry.py` |
+| FR1–3, FR48 — Onboarding | ✅ | `views/stripe.py`, `tasks/scanner.py`, `services/encryption.py` |
+| FR6–9 — Failure Detection (daily) | ✅ | `tasks/polling.py`, `engine/processor.py` |
+| FR10 — Recommended-Email Mapping | ✅ | `engine/rules.py`, `engine/email_recommendations.py` |
 | FR16–21, FR46 — Status Management | ✅ | `models/subscriber.py` (FSM), `services/audit.py` |
 | FR22–28 — Notifications | ✅ | `tasks/notifications.py`, `services/email.py` |
 | FR29–34 — Dashboard | ✅ | `views/dashboard.py`, Redis cache, `hooks/useDashboardSummary.ts` |
 | FR35–39 — Billing | ✅ | `services/tier.py`, Stripe Billing webhook |
-| FR40–45 — Operator Admin | ✅ | Django admin, `admin/retry_queue.py`, `admin/audit.py` |
+| FR42–45 — Operator Admin | ✅ | Django admin, `admin/audit.py`, `admin/subscriber.py` |
+| FR51 — Redirect Link | ✅ | `views/account.py`, `settings/RedirectLinkInput.tsx` |
+| FR52–55 — Failed-Payments Dashboard | ✅ | `views/email_dispatch.py`, `views/dashboard.py`, `dashboard/FailedPaymentsList.tsx` |
+| FR56 — Custom Email Body | ✅ | `views/account.py` (paid-tier fields), `services/email.py`, `settings/CustomBodyEditor.tsx` |
 
 **All 18 NFRs architecturally supported:**
 

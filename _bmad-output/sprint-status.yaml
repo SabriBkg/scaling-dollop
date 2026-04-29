@@ -1,5 +1,7 @@
 # generated: 2026-04-06
-# last_updated: 2026-04-28
+# last_updated: 2026-04-29
+# 2026-04-29: SCOPE SIMPLIFICATION — Epic 3 v0 quarantined to archive/v0-recovery-engine
+# Sprint Change Proposal: _bmad-output/sprint-change-proposal-2026-04-29.md
 # story_4-5_review_applied: 2026-04-27
 # story_4-5_review: 2026-04-27
 # story_4-5_created: 2026-04-27
@@ -57,7 +59,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-06
-last_updated: 2026-04-28
+last_updated: 2026-04-29
 story_4-5_review_applied: 2026-04-27
 story_4-5_review: 2026-04-27
 story_4-5_started: 2026-04-27
@@ -111,35 +113,43 @@ development_status:
   2-5-subscription-tiers-trial-mechanics-free-tier-degradation: done
   epic-2-retrospective: optional
 
-  # Epic 3: Recovery Engine, Compliance & Customer Status Management
-  epic-3: in-progress
-  3-1-dpa-acceptance-engine-mode-selection-flow: done
-  3-2-autopilot-recovery-engine-rule-execution-4-state-status-machine: done
-  3-3-card-update-detection-immediate-retry: done
-  3-4-supervised-mode-pending-action-queue-batch-approval: done
-  3-5-subscriber-status-cards-attention-bar: done
+  # Epic 3 (v0) — QUARANTINED 2026-04-29 to archive/v0-recovery-engine
+  epic-3-v0: quarantined
+  3-1-dpa-acceptance-engine-mode-selection-flow: quarantined
+  3-2-autopilot-recovery-engine-rule-execution-4-state-status-machine: quarantined
+  3-3-card-update-detection-immediate-retry: quarantined
+  3-4-supervised-mode-pending-action-queue-batch-approval: quarantined
+  3-5-subscriber-status-cards-attention-bar: quarantined
   epic-3-retrospective: optional
 
-  # Epic 4: End-Customer Notification System
+  # Epic 3 (v1): DPA Gate, Failed-Payments Dashboard & Email Actions
+  epic-3-v1: backlog
+  3-1-v1-dpa-acceptance-gate: backlog
+  3-2-v1-current-month-failed-payments-dashboard: backlog
+  3-3-v1-per-row-send-and-manual-resolve: backlog
+  3-4-v1-bulk-send-and-status-polling: backlog
+  3-5-v1-recommended-email-mapping: backlog
+
+  # Epic 4: End-Customer Notification System — REVISIONS REQUIRED for 4.1/4.2/4.3
   epic-4: in-progress
-  4-1-resend-integration-branded-failure-notification-email: review-applied
-  4-2-tone-selector-settings-live-notification-preview: done
-  4-3-final-notice-recovery-confirmation-emails: done
+  4-1-resend-integration-branded-failure-notification-email: revise-required-trigger-path
+  4-2-tone-selector-settings-live-notification-preview: revise-required-expand-redirect-link-and-custom-body
+  4-3-final-notice-recovery-confirmation-emails: revise-required-trigger-path
   4-4-opt-out-mechanism-notification-suppression: done
   4-5-email-based-password-reset-flow: in-progress
   epic-4-retrospective: optional
 
-  # Epic 5: Subscriber Detail, Analytics & Retention Emails
+  # Epic 5: Subscriber Detail, Analytics & Retention Emails — TRIM
   epic-5: backlog
   5-1-subscriber-detail-panel-payment-timeline: backlog
   5-2-fraud-flag-manual-resolution: backlog
-  5-3-recovery-analytics-month-over-month-dashboard: backlog
-  5-4-weekly-digest-email-monthly-savings-email-data-retention: backlog
+  5-3-recovery-analytics-month-over-month-dashboard: deferred-v2
+  5-4-weekly-digest-email-monthly-savings-email-data-retention: backlog-split  # weekly+retention v1; monthly-savings v2
   epic-5-retrospective: optional
 
-  # Epic 6: Operator Administration Console
+  # Epic 6: Operator Administration Console — TRIM
   epic-6: backlog
   6-1-operator-authentication-console-access-isolation: backlog
-  6-2-scheduled-retry-dashboard-manual-override: backlog
+  6-2-scheduled-retry-dashboard-manual-override: deferred-v2
   6-3-manual-status-advancement-audit-log-viewer: backlog
   epic-6-retrospective: optional

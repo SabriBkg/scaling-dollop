@@ -61,12 +61,20 @@
 
 ## Deferred from: code review of story-3-2 (2026-04-15)
 
+> **MOOT under 2026-04-29 simplification — see `_bmad-output/sprint-change-proposal-2026-04-29.md`**
+> Items below apply to the autonomous engine and are preserved on the `archive/v0-recovery-engine` branch.
+> Revisit only if the v2 quarantine is reactivated. Tag: `[moot-v1, applies-v2]`.
+
 - N+1 Stripe API calls in `_check_subscription_cancellations` and `_detect_card_updates` — iterates all active subscribers making individual API calls per subscriber with no batching or rate limiting. Will hit Stripe rate limits at scale.
 - Cache loss causes `_process_unqueued_failures` to potentially re-dispatch recovery actions for already-processed failures. Idempotent ingestion guards new failures, but recovery actions could duplicate.
 - `SubscriberFailure.amount_cents` is `IntegerField` (max ~2.1B) — potential overflow for high-value JPY/KRW transactions. Consider `BigIntegerField`.
 - Stripe `PaymentIntent.confirm` on `requires_payment_method` status will always fail without first attaching the subscriber's updated payment method. Retries burn business retry counts without actually re-charging. Needs a dedicated story to fetch default PM from Customer and attach to PI before confirming.
 
 ## Deferred from: code review of story-3-3 (2026-04-24)
+
+> **MOOT under 2026-04-29 simplification — see `_bmad-output/sprint-change-proposal-2026-04-29.md`**
+> Items below apply to the autonomous engine and are preserved on the `archive/v0-recovery-engine` branch.
+> Revisit only if the v2 quarantine is reactivated. Tag: `[moot-v1, applies-v2]`.
 
 - N+1 Stripe API calls in `_detect_card_updates` — 1 `Customer.retrieve` per active subscriber with pending failures. Spec Task 5.3 requires batching but it was not implemented. Will hit Stripe rate limits at scale.
 - N+1 Stripe API calls in `_check_subscription_cancellations` — Same N+1 pattern with `Subscription.list` per subscriber. Combined with card detection, 2+ API calls per subscriber per poll cycle.
@@ -75,6 +83,10 @@
 
 ## Deferred from: code review of story-3-4 (2026-04-24)
 
+> **MOOT under 2026-04-29 simplification — see `_bmad-output/sprint-change-proposal-2026-04-29.md`**
+> Items below apply to the supervised review queue / pending-action engine and are preserved on the `archive/v0-recovery-engine` branch.
+> Revisit only if the v2 quarantine is reactivated. Tag: `[moot-v1, applies-v2]`.
+
 - `_check_subscription_cancellations` calls `subscriber.mark_passive_churn()` directly instead of `_safe_transition()` — TransitionNotAllowed would crash the entire polling task for that account. Pre-existing; fix when touching subscription cancellation logic.
 - Business logic (decision re-derivation + execution loop) lives inline in `batch_approve_actions` view instead of a service function. Violates "no business logic in views" constraint. Functional as-is; refactor when adding batch action features.
 - `_safe_transition` has TOCTOU race: `method()` then `save()` without `select_for_update()`. Concurrent workers can overwrite subscriber state. Needs systemic DB-level locking pattern across all FSM transitions.
@@ -82,6 +94,10 @@
 - `process_retry_result` checks in-memory `subscriber.status` which can be stale from concurrent transitions. `_safe_transition` catches TransitionNotAllowed, but a `refresh_from_db` pattern would be more robust.
 
 ## Deferred from: code review of story-3-5 (2026-04-25)
+
+> **MOOT under 2026-04-29 simplification — see `_bmad-output/sprint-change-proposal-2026-04-29.md`**
+> Items below apply to the engine-activation backfill / polling-catchup paths and are preserved on the `archive/v0-recovery-engine` branch.
+> Revisit only if the v2 quarantine is reactivated. Tag: `[moot-v1, applies-v2]`.
 
 - Backfill / polling-catchup code duplication — `_backfill_recent_failures` (`backend/core/views/account.py`) and `_process_unqueued_failures` (`backend/core/tasks/polling.py`) are near-identical; extract to a shared service when next touching either path.
 - Backfill runs synchronously inside the engine-activation HTTP request (`views/account.py:247`) — risks request timeout for accounts with many recent failures. Move to a Celery task before scaling beyond MVP account sizes.
@@ -99,6 +115,10 @@
 - Backfill autopilot path emits no `trigger=engine_activation_backfill` audit metadata (only the supervised branch does); relies on `execute_recovery_action`'s own audit. Cross-check audit completeness in a dedicated pass.
 
 ## Deferred from: code review of story-4-1-resend-integration-branded-failure-notification-email (2026-04-25)
+
+> **PARTIALLY MOOT under 2026-04-29 simplification — see `_bmad-output/sprint-change-proposal-2026-04-29.md`**
+> Items referencing engine-driven trigger paths (`schedule_retry`, `recovery.py` retry FSM, `views/actions.py` engine dispatch, `review-queue/page.tsx` supervised UI, `pending_action_list`) are MOOT for v1 — they live on the `archive/v0-recovery-engine` branch. Tag: `[moot-v1, applies-v2]`.
+> Items about Resend integration itself (dead-letter coverage, `SAFENET_SENDING_DOMAIN` verification, sender-domain bounce risk) remain LIVE — they apply to v1's client-triggered email send path.
 
 - `test_dead_letter_on_exhausted_retries` calls `.run.__func__` with a mock `self` instead of going through Celery's real retry path — covers the dead-letter branch but not retry semantics. Needs a Celery integration test.
 - `schedule_retry` (`backend/core/services/recovery.py:153-156`) clears `next_retry_at` and saves before calling `_safe_transition`, whose return value is ignored — state and audit can drift if the FSM blocks the transition. Story 3.2 scope.
@@ -118,6 +138,10 @@
 - `useNotificationPreview` `staleTime: 5min` does not invalidate on `complete_profile` flow — if `account.company_name` changes, the preview shows stale text for up to 5 minutes. Cross-story fix: invalidate `["notification-preview"]` from the profile-completion handler (or any future endpoint that mutates `company_name`).
 
 ## Deferred from: code review of story-4-3-final-notice-recovery-confirmation-emails (2026-04-27)
+
+> **PARTIALLY MOOT under 2026-04-29 simplification — see `_bmad-output/sprint-change-proposal-2026-04-29.md`**
+> Items referencing FSM-trigger semantics (`is_last_retry`, `retry_cap` mid-flight, `_safe_transition` after retry_count save) are MOOT for v1 — final notice is now client-triggered, not FSM-driven. Tag: `[moot-v1, applies-v2]`.
+> Items about email-shell hardening (DLL/NotificationLog exception swallowing, `customer_update_url` scheme validation, `resend.Emails.send` timeout, `NotificationLog.email_type` choices, audit divergence on DB error, Resend SDK contract) remain LIVE — they apply to all v1 send paths.
 
 - `_record_failure` swallows all exceptions during DLL / NotificationLog writes (`backend/core/tasks/notifications.py`) — silent failures invisible to alerting. Pre-existing pattern from 4.1; address as a notifications-resilience epic.
 - `customer_update_url` accepts `javascript:` and other dangerous URL schemes (`backend/core/services/email.py:223`) — `html.escape(quote=True)` does not block scheme abuse on `<a href>`. Should be validated at the account-update boundary. Pre-existing across all CTA-bearing email types.

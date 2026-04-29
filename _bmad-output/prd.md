@@ -28,19 +28,19 @@ The core problem: Stripe's native dunning is code-agnostic. It applies the same 
 
 **Target user:** Solo SaaS founders and teams ≤5 with existing MRR, already on Stripe, too focused on building and growing to chase failed payments manually. The pain is dual: the direct revenue loss is significant at early MRR levels, and the attention cost of manual recovery is a distraction from the highest-leverage work available to a small team.
 
-**Primary value:** Automated, intelligent payment recovery that runs without operator involvement — freeing founders to stay focused on product and growth rather than operational fire-fighting.
+**Primary value:** Visibility on every failed payment, plus the right decline-code-aware dunning email Marc sends in one click. SafeNet diagnoses the failure; Marc decides what to send; the email goes out reflecting his brand voice.
 
-**Business model:** Three-tier freemium. Free tier delivers a genuine diagnostic dashboard (90-day retroactive scan, failure landscape, estimated recoverable revenue) — no actions fire, no paywall. Mid tier activates the recovery engine: code-aware retries, tone-selector notifications, GDPR-compliant flows. Pro tier (post-MVP) adds white-label notifications, AI-assisted copy, and passive churn export. 30-day full mid-tier trial; post-trial degradation to reduced polling frequency rather than hard paywall.
+**Business model:** Three-tier freemium. Free tier delivers a genuine diagnostic dashboard (90-day retroactive scan, current-month failed-payments list, failure landscape KPIs, estimated recoverable revenue) — view-only, no email sends. Mid tier activates email sending: per-row & batch dunning emails, three tone presets (Professional / Friendly / Minimal), redirect-link configuration, GDPR-compliant flows including DPA gate. Pro tier (post-MVP) adds custom email bodies per email type, white-label sending domain, AI-assisted copy. 30-day full Mid-tier trial; post-trial degradation to view-only Free.
 
 ### What Makes This Special
 
 **Diagnosis before action.** Competitors (Churnbuster, Gravy, Paddle Retain) compete on retry schedules. SafeNet competes on diagnostic accuracy. The decline-code rule engine maps 30+ Stripe codes to distinct recovery trees — `card_expired` never retries, it triggers a card-update notification immediately; `insufficient_funds` waits for payday timing; fraud flags stop all actions and surface for manual review.
 
-**Compliance as brand pillar, not feature.** EU-aware retry blocking (SEPA/UK direct debit re-authorization rules) and GDPR-compliant notification flows are built into v1 — not bolted on later. This is an explicit differentiator for European SaaS founders underserved by US-centric tools.
+**Compliance as brand pillar, not feature.** GDPR-compliant notification flows, DPA-gated email sending, and SEPA/UK direct-debit context warnings are built into v1 — not bolted on later. This is an explicit differentiator for European SaaS founders underserved by US-centric tools.
 
 **The free tier sells itself.** The diagnostic dashboard's "estimated recoverable revenue" number is always visible and always larger than the monthly fee. The free tier is a permanent, live ROI calculator — not a crippled preview.
 
-**Constrained action set as trust signal.** SafeNet does exactly two things: retry the original payment amount, or notify the end customer. No partial charges, no silent plan downgrades. Simplicity as an explicit trust mechanism.
+**One action, three voices.** SafeNet does exactly one thing to the end-customer: send a decline-code-appropriate dunning email reflecting the founder's chosen tone. No retries, no charges, no silent plan downgrades. The constraint is the trust signal — Marc retains full control of what subscribers hear.
 
 ## Project Classification
 
@@ -54,8 +54,8 @@ The core problem: Stripe's native dunning is code-agnostic. It applies the same 
 ### User Success
 
 - **First-login revelation:** Within 5 minutes of Stripe Connect authorization, the user sees a complete 90-day retroactive failure landscape — total failed payments, estimated recoverable revenue by decline code, and failure distribution. The dashboard is never empty on first load.
-- **30-day proof cycle:** The primary conversion trigger is not the dashboard — it is the first month of the recovery engine running. After 30 days, the user has a concrete record: failures detected, retries fired, payments recovered, revenue protected. The "aha moment" is proof, not promise.
-- **Zero operational involvement:** A successfully onboarded Mid-tier user runs SafeNet entirely on autopilot. No manual actions required after initial setup. Recovery happens without the founder's attention.
+- **30-day proof cycle:** The primary conversion trigger is the first month of dunning emails sent. After 30 days, the user has a concrete record: failures detected, emails sent, payments recovered, revenue protected. The "aha moment" is proof, not promise.
+- **Time-to-first-email:** Within 90 seconds of opening the dashboard for the first time (post-DPA), the user can send their first dunning email — recommended action pre-selected, one click to dispatch.
 - **Trusted brand voice:** Notifications sent to end-customers reflect the client's chosen tone (Professional / Friendly / Minimal) and never feel like third-party spam. End-customers engage with the notification as they would with the SaaS brand itself.
 
 ### Business Success
@@ -72,16 +72,16 @@ The core problem: Stripe's native dunning is code-agnostic. It applies the same 
 ### Technical Success
 
 - **Zero security incidents.** This is the non-negotiable 2am hotfix threshold. No unauthorized access to client Stripe tokens, no exposure of end-customer payment metadata, no data leaks of any kind. Security is the only absolute failure condition.
-- **100% scheduled retry execution.** Every retry queued by the rule engine fires within its scheduled window. Missed retries are a direct revenue failure for clients and a trust failure for SafeNet.
-- **Polling reliability ≥99.9% uptime.** The hourly polling job is the heartbeat of the system. Silent failures are unacceptable — missed polling cycles must be detected, alerted, and logged.
-- **Rule engine correctness.** Zero false-positive fraud flags (marking a legitimate failure as fraud stops all recovery actions permanently). Fraud classification must be conservative and auditable.
+- **Email send reliability ≥99.5%.** Marc-triggered email sends reach Resend successfully on first attempt. Failed sends are surfaced per-row, dead-lettered, and retryable.
+- **Polling reliability ≥99.9% uptime.** The daily polling job is the heartbeat of the system. Silent failures are unacceptable — missed polling cycles must be detected, alerted, and logged.
+- **Rule engine correctness.** Zero false-positive fraud flags (marking a legitimate failure as fraud stops all recommendations permanently). Fraud classification must be conservative and auditable.
 
 ### Measurable Outcomes
 
 - Time-to-first-insight ≤5 minutes post Stripe Connect authorization
 - First-login dashboard populated with retroactive data before user leaves the onboarding flow
 - Free-tier trial conversion ≥30% (30-day trial → Mid upgrade)
-- Recovery rate for `insufficient_funds` failures: target ≥40% of payday-aware retries succeed
+- Email-driven recovery rate: target ≥25% of dunning emails sent result in subscriber-initiated payment update + paid-on-retry-by-Stripe-natively within 14 days
 - Zero client-reported false fraud flags at MVP launch
 - All GDPR and geo-aware compliance requirements verified before first paying client onboards
 
@@ -89,16 +89,19 @@ The core problem: Stripe's native dunning is code-agnostic. It applies the same 
 
 ### MVP — Minimum Viable Product (Weeks 1–10)
 
-**Engine:**
+**Onboarding & Detection:**
 - Stripe Express Connect OAuth onboarding (zero API key handling)
-- Hourly polling-based failure detection (replaces webhook dependency)
-- 30+ decline-code rule engine with distinct recovery trees per code
-- Four-status state machine: Active → Recovered / Passive Churn / Fraud Flagged
-- Bounded retry with code-dependent caps
-- Payday-aware retry calendar for `insufficient_funds`
-- Geo-aware compliance layer: EU/UK retry blocking → routes to notify-only
-- Supervised mode / Autopilot toggle
-- Internal admin override panel (operator-facing, not client-facing)
+- Daily polling-based failure detection
+- 30+ decline-code mapper: each code → recommended dunning email type
+- Polling-detected status transitions: Active → Recovered (subscriber paid) / Passive Churn (subscription cancelled, paused, or unpaid)
+- Fraud flagging on `fraudulent` decline code: stops automatic recommendations; surfaces for manual review
+
+**Failed-Payments Dashboard (Mid):**
+- Current-month failed-payments list, populated daily
+- Per-row: subscriber name, amount, plain-language decline reason, recommended email type, status badge
+- Per-row action: Send recommended email, Send specific email (Update payment / Retry reminder / Final notice), Mark resolved, Exclude from future recommendations
+- Bulk select + bulk send (recommended-per-row OR single chosen type for all selected)
+- Empty-state: "No failed payments this month."
 
 **Dashboard (Free + Mid):**
 - 90-day retroactive scanner + first-login populated state
@@ -110,11 +113,12 @@ The core problem: Stripe's native dunning is code-agnostic. It applies the same 
 - Single anchored CTA on "estimated recoverable revenue"
 
 **Notifications (Mid):**
-- One crafted default template per notification type
+- Three crafted default templates: Update payment / Retry reminder / Final notice
 - Tone selector: 3 presets (Professional / Friendly / Minimal)
 - GDPR-compliant flow: opt-out links, data processor agreements, sender identification
-- Graceful final notice (last-attempt email, explicit and honest)
-- Recovery confirmation email to end-customer on successful retry
+- Recovery confirmation email (sent on polling-detected payment success or Marc-triggered Mark-as-resolved)
+- Redirect link configurable per account; embedded in all emails as the subscriber's payment-update CTA
+- (Pro/Mid paid tier) Custom email body per email type, overriding tone preset
 
 **Business mechanics:**
 - 30-day full Mid-tier trial
@@ -125,8 +129,9 @@ The core problem: Stripe's native dunning is code-agnostic. It applies the same 
 
 **Compliance (required before first paying client):**
 - GDPR: data processor agreements, opt-out in every notification, transparent sender identification, data retention policy
-- Geo-aware retry blocking: EU SEPA and UK direct debit contexts route to notify-only (no retry without re-authorization)
-- Least-privilege data model: SafeNet stores only Stripe event metadata (payment intent IDs, decline codes, timestamps, retry outcomes) — zero raw card data
+- DPA hard-gate: no dunning emails sent without signed DPA per account
+- Geo-aware compliance: SEPA/UK direct-debit context surfaced as a warning on the failed-payment row (hint to Marc that automated retry would be illegal); no automated retries to block in v1
+- Least-privilege data model: SafeNet stores only Stripe event metadata (payment intent IDs, decline codes, timestamps, email-send outcomes) — zero raw card data
 - Transparent data handling documentation published at launch
 
 ### Growth Features (Post-MVP)
@@ -160,15 +165,15 @@ The core problem: Stripe's native dunning is code-agnostic. It applies the same 
 
 **Rising Action:** He clicks Connect with Stripe. OAuth flow, one click, no API key. He's redirected to the dashboard. A scan animation runs for 8 seconds. Then the screen populates: 23 failed payments in 90 days. €640 estimated recoverable. Breakdown by decline code — 11 `insufficient_funds`, 7 `card_expired`, 3 `do_not_honor`, 2 `fraudulent`. He didn't know `card_expired` never retries itself. He didn't know what `do_not_honor` meant. He does now. The CTA reads: "Activate recovery engine — €29/month." The math is immediate.
 
-He starts the 30-day trial. Switches to Autopilot. Closes the tab.
+He starts the 30-day trial. Closes the tab.
 
-**Climax:** Day 18. Marc gets an email from SafeNet: "Payment recovered — €89 from a subscriber who updated their card." He hadn't thought about it once since setup. The engine caught an `insufficient_funds` case, waited for the 1st of the month payday window, retried, and succeeded. The subscriber got a friendly confirmation email. No support ticket. No churn.
+**Climax:** Day 7. Marc opens the dashboard for his weekly review. 4 new failures since last visit. Three are `insufficient_funds` — recommended email: Update payment. One is `card_expired` — recommended: Update payment. He reviews each row's decline reason, accepts the recommendations, clicks "Send recommended (4)". Resend confirmations land on the four subscribers' inboxes within seconds. Marc closes the tab.
 
-Day 30. Marc's billing date arrives. An email lands: *"This month, SafeNet recovered €310 for you. Your plan costs €29. Net benefit: €281."* He upgrades to Mid before the trial expires.
+Day 21. Marc gets a recovery confirmation summary email from SafeNet: *"3 of your 4 dunning emails this fortnight resulted in successful payment. €234 recovered."* The fourth subscriber's status is now Passive Churn (subscription cancelled). Marc upgrades to Mid before the trial expires.
 
-**Resolution:** Marc's dashboard is now a weekly ritual, not anxiety. Every Monday he sees the recovery analytics section — who's in Active status, who recovered, who graduated to Passive Churn. He knows exactly what's happening in his payment infrastructure. SafeNet runs without him.
+**Resolution:** Marc's dashboard is now a weekly ritual, not anxiety. Every Monday he opens the failed-payments list, reviews the recommended emails, sends what he agrees with, marks resolved what's already paid offline. He knows exactly what's happening in his payment infrastructure. SafeNet does the diagnosis; he stays in control of every send.
 
-*This journey reveals requirements for: Stripe Connect OAuth, retroactive scanner, dashboard KPIs, trial mechanics, autopilot mode, payday-aware retry, recovery confirmation email, "SafeNet saved you" billing email, upgrade flow.*
+*This journey reveals requirements for: Stripe Connect OAuth, retroactive scanner, dashboard KPIs, trial mechanics, DPA gate, failed-payments list, per-row recommended email, bulk send, recovery confirmation email, upgrade flow.*
 
 ---
 
@@ -182,7 +187,7 @@ Day 30. Marc's billing date arrives. An email lands: *"This month, SafeNet recov
 
 Marc reaches out to the customer directly via email, outside SafeNet's scope. The customer replies within the hour: their card issuer had flagged their card after an unrelated compromise. They've already issued a new card. They send the new card details. Marc marks the case as resolved in SafeNet and logs the recovery manually.
 
-**Climax:** Marc realizes what didn't happen: SafeNet didn't retry a fraud-flagged card (which would have triggered additional fraud alerts with the issuer), didn't send an automated email to a confused customer who was already dealing with a security incident, didn't silently drop the subscriber.
+**Climax:** Marc realizes what didn't happen: SafeNet didn't recommend a dunning email to a confused customer who was already dealing with a security incident, didn't silently drop the subscriber, and didn't expose any automatic action that might have surprised the issuer. SafeNet did nothing — no email recommendation, just the flag.
 
 **Resolution:** Marc trusts the rule engine more after this edge case than after the happy path. He adds a note to his internal Notion: *"SafeNet is conservative. That's the feature."*
 
@@ -200,27 +205,27 @@ Marc reaches out to the customer directly via email, outside SafeNet's scope. Th
 
 Sophie clicks the link, updates her card in 90 seconds, and goes back to what she was doing.
 
-**Climax:** The next hourly poll picks up the card update. SafeNet queues an immediate retry. It succeeds. Sophie gets a second email: *"All sorted — payment confirmed. Thanks for updating your details."* She barely registers it. Her subscription continues.
+**Climax:** Stripe processes the payment automatically against her new card on the next billing cycle. The next daily poll detects the success. SafeNet sends the recovery confirmation email: *"All sorted — payment confirmed. Thanks for updating your details."* She barely registers it. Her subscription continues.
 
 **Resolution:** Sophie never felt chased. She never felt surveilled. The experience was indistinguishable from a well-run SaaS handling billing in-house.
 
-*This journey reveals requirements for: branded notification email, card-update CTA, clear opt-out link, data processor agreement footer, GDPR compliance, recovery confirmation email, retry on card update detection.*
+*This journey reveals requirements for: branded notification email, card-update CTA, clear opt-out link, data processor agreement footer, GDPR compliance, recovery confirmation email.*
 
 ---
 
-### Journey 4: The SafeNet Operator — The Midnight Override
+### Journey 4: The SafeNet Operator — The Audit Log Spot-Check
 
-**Persona:** The SafeNet operator. It's 11pm. Checking the admin override panel during the first week of live clients.
+**Persona:** The SafeNet operator. Tuesday afternoon. A Mid-tier client has emailed support: "I sent a final notice email to a subscriber on Friday and they say they never got it."
 
-**Opening Scene:** Internal admin view open. Three retries scheduled to fire before 6am. Two look clean — `insufficient_funds` cases, payday timing confirmed, notification history normal. The third catches attention: an `authorization_failure` that's been retried twice already, scheduled for a third attempt at 4am. The client's retry cap for this code is set to 3. The pattern feels off — the customer has been in Active status for 19 days, never responded to two notifications, and the card issuer has declined both previous retries with the same code.
+**Opening Scene:** Operator pulls up Django admin → audit logs filtered by the client's account_id. Locates the email-send entry: type `final_notice`, dispatched 2026-04-26 14:03 UTC, recipient `subscriber@example.com`, trigger `client_manual`, status `dispatched_to_resend`.
 
-**Rising Action:** Pulling up the Stripe event log for this payment intent. The decline isn't changing — same issuer, same code, same outcome. A third retry at 4am will just add noise and potentially irritate the card issuer.
+**Rising Action:** Cross-referencing the Resend dead-letter log for that recipient. Resend bounced the message: domain `example.com` MX record returned a 550 (mailbox not found, typo in subscriber's email).
 
-**Climax:** Override the retry from the admin panel. Add a note to the event log: *"Manual override — pattern suggests card blocked at issuer level, not temporary. Escalated to Passive Churn early."* Advance the customer's status to Passive Churn manually. The 4am retry is cancelled.
+**Climax:** Operator records the finding in the audit log thread, replies to the client: "Email dispatched correctly on your end; the subscriber's mailbox bounced (Resend code 550). Recommend confirming the email address with them out-of-band." Adds an internal ticket to surface bounce status on per-row email-send history in a future iteration.
 
-**Resolution:** No retry fires. The client's dashboard shows the customer correctly graduated to Passive Churn with a full audit trail. In the morning, a new heuristic is added to the engine: flag `authorization_failure` cases with 2+ identical-code retries for human review rather than automatic third retry.
+**Resolution:** No data corruption, no missed action — the email was sent, the bounce was logged, the operator's role was to translate that into a clear answer for Marc. A more visible bounce-status indicator on the failed-payments list goes onto the v2 backlog.
 
-*This journey reveals requirements for: internal admin override panel, retry schedule visibility, manual status advancement, event log with notes, audit trail, admin-only access controls.*
+*This journey reveals requirements for: audit log with email-send entries (timestamp, type, trigger, status), Resend dead-letter visibility, manual status advancement (still relevant for edge cases polling misses), admin-only access controls.*
 
 ---
 
@@ -230,18 +235,18 @@ Sophie clicks the link, updates her card in 90 seconds, and goes back to what sh
 |----------------|-------------|
 | Stripe Connect OAuth + retroactive scanner | Journey 1 |
 | Decline-code dashboard with failure breakdown | Journey 1 |
-| Autopilot / Supervised mode toggle | Journey 1 |
-| Payday-aware retry execution | Journey 1 |
+| Failed-payments list with per-row recommended email + bulk send | Journey 1 |
+| DPA hard-gate before first email send | Journey 1 |
 | Trial mechanics + upgrade flow | Journey 1 |
-| "SafeNet saved you" billing email | Journey 1 |
-| Fraud flag status + full action stop | Journey 2 |
+| "SafeNet saved you" / fortnightly recovery summary email | Journey 1 |
+| Fraud flag status + recommendation suppression | Journey 2 |
 | Customer detail view + payment history | Journey 2 |
 | Manual resolution flow + audit trail | Journey 2, 4 |
 | Branded notification email with tone selector | Journey 3 |
 | Card-update CTA + GDPR opt-out | Journey 3 |
 | Recovery confirmation email | Journey 3 |
-| Internal admin override panel | Journey 4 |
-| Retry schedule visibility for operator | Journey 4 |
+| Audit log with email-send entries | Journey 4 |
+| Resend dead-letter visibility | Journey 4 |
 | Manual status advancement | Journey 4 |
 | Admin-only access controls | Journey 4 |
 
@@ -271,25 +276,26 @@ Sophie clicks the link, updates her card in 90 seconds, and goes back to what sh
 
 | Risk | Mitigation |
 |------|-----------|
-| Retry fires causing end-customer overdraft | Supervised mode available — client explicitly authorizes each retry before firing. In Autopilot, retry timing rules (payday-aware, fixed delays) are designed to minimize insufficient-funds scenarios. |
-| False fraud flag stops legitimate recovery permanently | Fraud classification is conservative and auditable. Client can manually resolve and log any fraud flag. No automated re-classification. |
+| Marc bulk-sends wrong email type to all subscribers | Bulk-send confirmation dialog shows per-row email type + count; per-row preview accessible from the dialog; recommended-email default skews conservative (Update payment for first-time failures). |
+| Email sent without DPA acceptance | DPA hard-gate — backend rejects every send for accounts without a recorded DPAAcceptance row. Frontend disables send buttons in tandem. |
+| False fraud flag stops legitimate recommendation permanently | Fraud classification is conservative and auditable. Client can manually resolve and log any fraud flag. No automated re-classification. |
 | Stripe token compromise | AES-256 DB encryption + env-level key storage. Tokens scoped to minimum required permissions. |
-| Notification sent to opted-out end-customer | Opt-out state stored per end-customer per client. Engine checks opt-out status before every notification action. |
+| Notification sent to opted-out end-customer | Opt-out state stored per end-customer per client. Backend checks opt-out status before every send. |
 | GDPR breach via email provider | DPA required with email provider. End-customer email addresses not stored beyond active recovery window. |
-| Retry cap exceeded without client awareness | Dashboard surfaces Passive Churn status prominently. Weekly digest email includes new Passive Churn count. |
+| Subscriber stuck in Active status long after Stripe-side resolution | Daily polling reconciles paid/cancelled state and transitions Active → Recovered / Passive Churn. Marc can also manually mark resolved. |
 
 ## Innovation & Novel Patterns
 
 ### Detected Innovation Areas
 
 **1. Diagnosis-First Dunning**
-SafeNet reframes the dunning problem from "when to retry" to "why did it fail, and what does that specific reason require?" The decline-code rule engine maps 30+ Stripe failure codes to distinct recovery trees — a structural innovation in how payment recovery is approached. `card_expired` never retries (it's pointless); `insufficient_funds` waits for payday timing; `fraudulent` stops all automation immediately. No competitor applies this logic. This is SafeNet's primary moat.
+SafeNet reframes the dunning problem from "when to retry" to "why did it fail, and what email does that specific reason require?" The decline-code rule engine maps 30+ Stripe failure codes to distinct recommended dunning email types — a structural innovation in how payment recovery is approached. `card_expired` → Update payment email; `insufficient_funds` → Update payment, escalating to Retry reminder after a week; `fraudulent` stops all recommendations immediately. No competitor diagnoses the code first. This is SafeNet's primary moat.
 
-**2. Payday-Aware Retry Calendar**
-Payday timing has been used in consumer lending and debt collection for decades. SafeNet applies it to B2B SaaS subscription recovery for the first time. For `insufficient_funds` failures, retries fire within a 24-hour window after the 1st or 15th of the month — the two most common payday dates globally. Simple, explainable, concretely differentiated on the landing page.
+**2. One-Click Recommended Actions on a Failed-Payment List**
+SafeNet inverts the dunning workflow: instead of configuring rules upfront and trusting automation, Marc opens his daily dashboard, sees a list of every failed payment, and ships a recommended email per row in one click. The cognitive load is "review the list" not "configure the engine." This is novel — every other dunning tool optimizes for absent-operator automation; SafeNet optimizes for present-operator decisiveness.
 
 **3. Compliance as Architecture, Not Feature**
-EU SEPA and UK direct debit retry restrictions are non-overridable engine rules — not a settings toggle that can be misconfigured. GDPR-compliant notification flows and DPA requirements are hard gates before engine activation. SafeNet is the first dunning tool designed from the ground up for global SaaS, not US-first SaaS. This creates a defensible first-mover position with European solo founders who are systematically underserved by existing tools.
+DPA acceptance gates email sending (no email sends without DPA per account). GDPR transactional classification is enforced for all dunning emails. Opt-out is checked before every send. SEPA/UK direct-debit context surfaces as a per-row warning. SafeNet is the first dunning tool designed from the ground up for global SaaS, not US-first SaaS. This creates a defensible first-mover position with European solo founders who are systematically underserved by existing tools.
 
 ### Market Context & Competitive Landscape
 
@@ -305,7 +311,7 @@ No existing tool combines: (1) decline-code-aware rule engine + (2) GDPR/EU comp
 ### Validation Approach
 
 - **Diagnosis-first:** Validated when first free-tier users see their 90-day retroactive breakdown and recognize the failure taxonomy without explanation. Qualitative signal: "I didn't know `card_expired` retrying was useless until I saw this."
-- **Payday-aware retry:** Validated by measuring `insufficient_funds` recovery rate at payday-window retries vs. fixed-delay retries. Target: ≥40% recovery rate at payday window.
+- **One-click recommended action:** Validated when first paying users send their first dunning email within 90 seconds of opening the dashboard post-DPA, accept the recommendation in ≥70% of sends, and report the workflow as "review, not configure."
 - **Compliance moat:** Validated when first EU-based client explicitly cites GDPR/geo-compliance as the reason they chose SafeNet over alternatives.
 
 ### Risk Mitigation
@@ -338,11 +344,11 @@ SafeNet is a single-tenant B2B SaaS at MVP. Each client account maps to one Stri
 
 | Tier | Price | Features | Status |
 |------|-------|----------|--------|
-| Free | €0/month | Dashboard + 90-day retroactive scan + failure landscape KPIs. Polling: hourly during 30-day trial, drops to twice-monthly post-trial. No recovery engine. Single CTA anchored to "estimated recoverable revenue". | Launch |
-| Mid | €29/month | Full recovery engine: decline-code rules, payday-aware retries, geo-compliance layer, Supervised/Autopilot toggle, tone-selector notifications (3 presets), GDPR-compliant flows, recovery analytics, weekly digest email, "SafeNet saved you" billing email. Emails sent from SafeNet-managed domain (`payments.safenet.app`) with client brand name in From field. No DNS setup required. | Launch |
+| Free | €0/month | Dashboard + 90-day retroactive scan + failure landscape KPIs + current-month failed-payments list (view-only). DPA gate not required (no email sends). Polling: daily during 30-day trial; drops to weekly post-trial. **No email sends.** | Launch |
+| Mid | €29/month | Free + DPA-gated dunning email sends (per-row & bulk), three tone presets (Professional / Friendly / Minimal), redirect-link configuration, custom email body editor per email type, GDPR-compliant flows, recovery confirmation, opt-out infrastructure. Emails sent from SafeNet-managed domain (`payments.safenet.app`) with client brand name in From field. No DNS setup required. | Launch |
 | Pro | €79/month | Mid tier + white-label notifications with full custom sending domain (client's own domain — `billing@client-app.io`), zero SafeNet footprint in email headers, AI-assisted notification copy, passive churn CSV export (Mailchimp/Klaviyo/Brevo-ready), proactive card expiry detection. SafeNet provides DNS configuration guide (DKIM/SPF/DMARC). | Announced at launch, built after first 20 Mid clients |
 
-**Trial mechanics:** 30-day full Mid-tier access for all new accounts. No credit card required to start trial. On day 30, non-upgraders are automatically downgraded to Free (degraded polling). Degradation is visible in the dashboard ("your next scan is in X days").
+**Trial mechanics:** 30-day full Mid-tier access for all new accounts. No credit card required to start trial. On day 30, non-upgraders are automatically downgraded to Free (view-only failed-payments list, no email sends, weekly polling cadence). Degradation is visible in the dashboard ("your next scan is in X days").
 
 **Billing:** Stripe Billing for SafeNet's own subscription management. Consistent with the product's Stripe-native positioning.
 
@@ -460,36 +466,34 @@ See **Product Scope → Growth Features** and **Vision** sections for the full p
 
 - **FR1:** A new user can connect their Stripe account to SafeNet via OAuth without handling API keys — after OAuth authorization, the user completes a one-time profile setup (name, company name, password) before reaching the dashboard
 - **FR2:** SafeNet can perform a retroactive 90-day payment failure scan immediately after Stripe Connect authorization
-- **FR3:** A client must acknowledge and sign a Data Processing Agreement before the recovery engine is activated
-- **FR4:** A client can choose between Supervised mode and Autopilot mode as their retry authorization model
-- **FR5:** A client can switch between Supervised and Autopilot mode at any time after initial setup
+- **FR3:** A client must acknowledge and sign a Data Processing Agreement before any dunning email is sent on their behalf
 - **FR48:** Each client account supports exactly one user at MVP — multi-user access and team invitations are not available
 - **FR49:** After Stripe Connect authorization, a new user must provide their full name, company/SaaS product name, and set a password before accessing the dashboard — this profile completion step is mandatory for first-time users and enables email/password login on subsequent visits
 - **FR50:** A user who forgets their password can recover access via Stripe OAuth re-authentication on the login page; a full email-based password reset flow is available once the transactional email system is operational (Epic 4)
 
 ### Payment Failure Detection
 
-- **FR6:** SafeNet can detect new failed payment events from a connected Stripe account on an hourly polling cycle
+- **FR6:** SafeNet can detect new failed payment events from a connected Stripe account on a daily polling cycle
 - **FR7:** SafeNet can classify each failed payment by its Stripe decline code
 - **FR8:** SafeNet can display a breakdown of all detected failures by decline code category
 - **FR9:** SafeNet can calculate and display an estimated recoverable revenue figure based on detected failures
 
-### Recovery Engine
+### Failed-Payments Dashboard & Recommended Emails
 
-- **FR10:** SafeNet can apply distinct recovery rules to each decline code category (retry-only, notify-only, retry+notify, no-action)
-- **FR11:** SafeNet can schedule `insufficient_funds` retries within a 24-hour window after the 1st or 15th of the month
-- **FR12:** SafeNet can enforce a maximum retry count per failure by decline code category: `insufficient_funds` (3 retries), `do_not_honor` / `generic_decline` (2 retries), `card_velocity_exceeded` (1 retry), `card_expired` (0 retries — notify only), all other codes (1 retry unless overridden by rule engine)
-- **FR13:** SafeNet can detect EU/UK payment contexts (identified via Stripe payment method country or customer billing address country) and route them to notify-only, blocking automated retries
-- **FR47:** SafeNet can detect when an end-customer updates their payment method and queue an immediate retry for their most recent Active-status failure, independent of the payday-aware schedule
-- **FR14:** In Supervised mode, SafeNet queues pending actions for explicit client approval before execution
-- **FR15:** In Autopilot mode, SafeNet executes recovery actions automatically per the rule engine without client intervention
+- **FR10:** SafeNet maps each decline code to a recommended dunning email type (Update payment / Retry reminder / Final notice / no-recommendation for fraud-flagged), via a versioned rule engine config
+- **FR51:** A client can configure a redirect link in their account settings; the link is embedded in all dunning emails as the subscriber's "update payment" CTA target (defaults to the Stripe customer portal URL)
+- **FR52:** A client's dashboard shows all failed payments for the current month, with a per-row recommended email type derived from the decline code via the rule engine
+- **FR53:** A client can trigger a dunning email per failed-payment row — accepting the recommended email type or choosing any of {Update payment, Retry reminder, Final notice}
+- **FR54:** A client can multi-select failed-payment rows and trigger a bulk send — either "Send recommended per row" or "Send [chosen type] for all selected", with a confirmation dialog showing count + email types before dispatch
+- **FR55:** A client can manually mark a failed payment as Resolved (transitions subscriber to Recovered with a manual-resolution audit note)
+- **FR56:** Paid-tier clients can provide a custom email body per email type in account settings; the custom body overrides the tone preset for that email type when sending
 
 ### Customer Status Management
 
-- **FR16:** SafeNet assigns and displays one of four statuses to each end-customer with a failed payment: Active, Recovered, Passive Churn, Fraud Flagged
-- **FR17:** SafeNet can transition a customer from Active to Recovered when a retry succeeds
-- **FR18:** SafeNet can transition a customer to Passive Churn when the retry cap is exhausted without recovery
-- **FR19:** SafeNet immediately flags a customer as Fraud Flagged and stops all actions when a fraud decline code is detected
+- **FR16:** SafeNet assigns and displays one of four statuses to each end-customer with a failed payment: Active, Recovered, Passive Churn, Fraud Flagged. Statuses are assigned by daily polling detection (paid → Recovered, cancelled/unpaid/paused → Passive Churn, fraudulent code → Fraud Flagged) and by client manual action (mark resolved → Recovered, exclude → no further recommendation)
+- **FR17:** SafeNet can transition a customer from Active to Recovered when the next daily poll detects payment success, or the client manually marks the failure resolved
+- **FR18:** SafeNet can transition a customer to Passive Churn when the daily poll detects subscription `cancelled`, `unpaid`, `paused`, or `cancel_at_period_end`, or the client manually marks the subscriber as churned
+- **FR19:** SafeNet immediately flags a customer as Fraud Flagged and suppresses all email recommendations when a fraud decline code is detected
 - **FR20:** A client can view the payment history and current status for any individual end-customer
 - **FR21:** A client can manually resolve a Fraud Flagged status and record a resolution reason
 - **FR46:** SafeNet can detect when an end-customer's Stripe subscription moves to a non-recoverable state (`cancelled`, `unpaid`, `paused`) or is flagged as `cancel_at_period_end`, and automatically stops all recovery actions, graduating the customer to Passive Churn with the specific reason recorded
@@ -498,8 +502,8 @@ See **Product Scope → Growth Features** and **Vision** sections for the full p
 
 - **FR22:** SafeNet can send a branded email notification to an end-customer when their payment fails
 - **FR23:** A client can select the notification tone from three presets (Professional / Friendly / Minimal)
-- **FR24:** SafeNet can send a final notice email to an end-customer on the last retry attempt, before graduating them to Passive Churn
-- **FR25:** SafeNet can send a payment recovery confirmation email to an end-customer when a retry succeeds
+- **FR24:** SafeNet can send a final notice email to an end-customer when the client triggers a final-notice send on a failed-payment row (manual or via bulk action with email type "Final notice" chosen)
+- **FR25:** SafeNet can send a payment recovery confirmation email to an end-customer when the next daily poll detects payment success or the client marks the failure resolved
 - **FR26:** Every notification sent to an end-customer includes a functional opt-out mechanism
 - **FR27:** SafeNet suppresses all future notifications for an end-customer who has opted out via a SafeNet notification link. All SafeNet notifications are classified as transactional messages (contractual necessity) — a standard marketing opt-out from the client's own communications does not suppress SafeNet notifications.
 - **FR28:** Mid-tier clients' notifications are sent from a SafeNet-managed shared sending domain with the client's brand name in the From field
@@ -523,8 +527,6 @@ See **Product Scope → Growth Features** and **Vision** sections for the full p
 
 ### Operator Administration
 
-- **FR40:** The SafeNet operator can view all scheduled retries across all accounts before they fire
-- **FR41:** The SafeNet operator can cancel a scheduled retry and record a reason in the audit log
 - **FR42:** The SafeNet operator can manually advance a customer's status and record the reason
 - **FR43:** SafeNet records every engine action in an append-only audit log with timestamp, actor, and outcome
 - **FR44:** The SafeNet operator can view the full audit log for any customer or account
@@ -543,8 +545,8 @@ See **Product Scope → Growth Features** and **Vision** sections for the full p
 
 ### Reliability
 
-- **NFR-R1:** The hourly polling job executes every 60 minutes (±5 minutes tolerance); a missed cycle triggers an operator alert within 90 minutes
-- **NFR-R2:** Scheduled retries fire within their designated time window with ≤15 minutes variance
+- **NFR-R1:** The daily polling job executes once every 24 hours (±2 hours tolerance); a missed poll triggers an operator alert within 30 hours
+- **NFR-R2:** Marc-triggered email dispatches reach Resend within 5 seconds of the trigger (synchronous queue with async dispatch)
 - **NFR-R3:** Every engine action either succeeds or is logged as failed with a reason — zero silent failures permitted
 - **NFR-R4:** System uptime target: ≥99.5% measured monthly
 - **NFR-R5:** The job queue implements dead-letter handling — failed jobs are captured, logged, and surfaced for operator review rather than silently dropped
