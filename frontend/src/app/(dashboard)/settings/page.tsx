@@ -1,38 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { Shield } from "lucide-react";
 import { useAccount } from "@/hooks/useAccount";
-import { useQueryClient } from "@tanstack/react-query";
 import { TierBadge } from "@/components/settings/TierBadge";
 import { ToneSelector } from "@/components/settings/ToneSelector";
 import { NotificationPreview } from "@/components/settings/NotificationPreview";
 import { UpgradeCTA } from "@/components/dashboard/UpgradeCTA";
-import { toast } from "sonner";
-import api from "@/lib/api";
-import type { Account, ApiResponse } from "@/types";
 
 export default function SettingsPage() {
   const { data: account, isLoading } = useAccount();
-  const queryClient = useQueryClient();
-  const [isSwitching, setIsSwitching] = useState(false);
-
-  const handleModeChange = async (mode: "autopilot" | "supervised") => {
-    if (!account || account.engine_mode === mode) return;
-    setIsSwitching(true);
-    try {
-      const { data } = await api.post<ApiResponse<Account>>("/account/engine/mode/", { mode });
-      queryClient.setQueryData(["account", "me"], data.data);
-      queryClient.invalidateQueries({ queryKey: ["account", "me"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
-      queryClient.invalidateQueries({ queryKey: ["actions", "pending"] });
-      queryClient.invalidateQueries({ queryKey: ["subscribers"] });
-      toast.success(`Recovery mode updated to ${mode}`);
-    } catch {
-      toast.error("Failed to update recovery mode. Please try again.");
-    } finally {
-      setIsSwitching(false);
-    }
-  };
 
   return (
     <div>
@@ -77,6 +54,42 @@ export default function SettingsPage() {
         )}
       </section>
 
+      {account && account.tier !== "free" && (
+        <section className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-6">
+          <div className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-[var(--accent-active)]" />
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+              Data Processing Agreement
+            </h2>
+          </div>
+
+          {account.dpa_accepted_at ? (
+            <div className="mt-4 space-y-1 text-sm">
+              <p className="text-[var(--text-primary)]">
+                Signed on{" "}
+                {new Date(account.dpa_accepted_at).toLocaleDateString()}
+              </p>
+              <p className="text-[var(--text-secondary)]">
+                Version {account.dpa_version ?? "v0-legacy"}
+              </p>
+            </div>
+          ) : (
+            <div className="mt-4 space-y-3">
+              <p className="text-sm text-[var(--text-secondary)]">
+                You must sign the Data Processing Agreement before SafeNet can
+                send dunning emails to your subscribers.
+              </p>
+              <Link
+                href="/activate"
+                className="inline-block rounded-lg bg-[var(--cta)] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--cta-hover)] focus:outline-2 focus:outline-offset-2 focus:outline-[var(--accent-active)]"
+              >
+                Sign the Data Processing Agreement
+              </Link>
+            </div>
+          )}
+        </section>
+      )}
+
       {account && (
         <section className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-6">
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">
@@ -92,61 +105,17 @@ export default function SettingsPage() {
               onChange={() => {}}
               disabled={
                 account.tier === "free" ||
-                !account.dpa_accepted ||
-                !account.engine_mode
+                !account.dpa_accepted
               }
               disabledHint={
                 account.tier === "free"
                   ? "Upgrade to Mid or Pro to customize your subscriber notifications."
                   : !account.dpa_accepted
                     ? "Accept the Data Processing Agreement to enable tone selection."
-                    : !account.engine_mode
-                      ? "Activate the recovery engine to enable tone selection."
-                      : undefined
+                    : undefined
               }
             />
             <NotificationPreview tone={account.notification_tone} />
-          </div>
-        </section>
-      )}
-
-      {account?.dpa_accepted && account.tier !== "free" && (
-        <section className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] p-6">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-            Recovery Mode
-          </h2>
-
-          <div className="mt-4 space-y-3">
-            {(["autopilot", "supervised"] as const).map((mode) => (
-              <label
-                key={mode}
-                className={`flex cursor-pointer items-center gap-3 rounded-lg border p-4 transition-colors ${
-                  account.engine_mode === mode
-                    ? "border-[var(--accent-active)] bg-[var(--accent-active)]/5"
-                    : "border-[var(--border)] hover:border-[var(--text-tertiary)]"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="engine_mode"
-                  value={mode}
-                  checked={account.engine_mode === mode}
-                  onChange={() => handleModeChange(mode)}
-                  disabled={isSwitching}
-                  className="accent-[var(--accent-active)]"
-                />
-                <div>
-                  <span className="text-sm font-medium capitalize text-[var(--text-primary)]">
-                    {mode}
-                  </span>
-                  <p className="text-xs text-[var(--text-secondary)]">
-                    {mode === "autopilot"
-                      ? "SafeNet handles all recovery automatically — no action required from you."
-                      : "SafeNet queues actions for your review before executing."}
-                  </p>
-                </div>
-              </label>
-            ))}
           </div>
         </section>
       )}

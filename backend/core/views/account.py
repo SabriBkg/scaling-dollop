@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from core.serializers.account import CompleteProfileSerializer
 from core.services.audit import write_audit_event
+from core.services.dpa import CURRENT_DPA_VERSION
 from core.services.optout_token import build_optout_url
 from core.services.tier import get_polling_frequency, is_engine_active
 
@@ -135,6 +136,7 @@ def _build_account_response(account, user) -> dict:
             "profile_complete": account.profile_complete,
             "dpa_accepted": account.dpa_accepted,
             "dpa_accepted_at": account.dpa_accepted_at.isoformat() if account.dpa_accepted_at else None,
+            "dpa_version": account.dpa_version or None,
             "engine_mode": account.engine_mode,
             "notification_tone": account.notification_tone,
             "created_at": account.created_at.isoformat(),
@@ -151,7 +153,6 @@ def accept_dpa(request):
     except request.user.__class__.account.RelatedObjectDoesNotExist:
         raise NotFound("No account associated with this user.")
 
-    accepted_now = False
     with transaction.atomic():
         from core.models.account import Account, TIER_FREE
         account = Account.objects.select_for_update().get(pk=account.pk)
@@ -163,17 +164,20 @@ def accept_dpa(request):
             )
 
         if account.dpa_accepted:
-            pass  # idempotent — skip write and audit
+            pass  # idempotent — skip write and audit. Re-accepting NEVER bumps
+            # dpa_version: a v0-legacy account that re-hits this endpoint stays
+            # "v0-legacy" forever, preserving the carry-forward signal (AC3).
         else:
             account.dpa_accepted_at = timezone.now()
-            account.save(update_fields=["dpa_accepted_at"])
-            accepted_now = True
+            account.dpa_version = CURRENT_DPA_VERSION
+            account.save(update_fields=["dpa_accepted_at", "dpa_version"])
 
             write_audit_event(
                 subscriber=None,
                 actor="client",
                 action="dpa_accepted",
                 outcome="success",
+                metadata={"dpa_version": CURRENT_DPA_VERSION},
                 account=account,
             )
 
@@ -345,12 +349,8 @@ def set_notification_tone(request):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        if not account.engine_mode:
-            return Response(
-                {"error": {"code": "ENGINE_MODE_NOT_SET", "message": "Activate the recovery engine before changing the notification tone."}},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
+        # v1: notification tone no longer requires engine_mode. DPA acceptance
+        # is the sole gate for tone customization (Story 3.1 v1).
         old_tone = account.notification_tone
         if old_tone == tone:
             pass  # idempotent — no change needed

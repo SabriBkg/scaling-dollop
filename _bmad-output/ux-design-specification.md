@@ -307,7 +307,7 @@ No existing brand identity. The following direction is defined as part of this U
 | `--cta` | `#0F172A` | `#F0F2F7` | Primary CTA (dark on light / light on dark) |
 | `--cta-hover` | `#1E293B` | `#FFFFFF` | CTA hover state |
 
-**CTA rationale:** A near-black CTA on light mode and near-white on dark mode signals authority and restraint — not a startup accent color. It reads as professional fintech, not developer tooling. The single conversion action ("Activate recovery engine") earns its weight through contrast, not color.
+**CTA rationale:** A near-black CTA on light mode and near-white on dark mode signals authority and restraint — not a startup accent color. It reads as professional fintech, not developer tooling. The primary conversion actions ("Sign DPA to enable sends" / "Send recommended emails") earn their weight through contrast, not color.
 
 **The spectrum test:** Every component should pass a two-person review:
 - Would a non-technical founder trust this with their payment data?
@@ -348,7 +348,7 @@ If both answers are yes, the design is right.
 - Badge component — extend with SafeNet's 4 status variants (Recovered, Active, Passive Churn, Fraud Flagged)
 
 **Build custom:**
-- `EngineStatusBar` — ambient indicator: engine state, last scan, next action
+- `PollingStatusIndicator` — ambient indicator: polling cadence, last scan timestamp, next scan ETA (per NFR-R1 daily cadence)
 - `RecoveryHeroCard` — dominant "recovered this month" display
 - `DeclineCodeExplainer` — plain-language translation of Stripe codes
 - `BatchActionToolbar` — failed-payments multi-select controls; primary action: 'Send recommended (N)'; secondary: 'Send specific (chosen type)'; tertiary: 'Mark resolved (N)' / 'Exclude (N)'

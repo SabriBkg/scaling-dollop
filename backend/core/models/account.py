@@ -53,6 +53,7 @@ class Account(models.Model):
         null=True,
         blank=True,
     )
+    dpa_version = models.CharField(max_length=64, blank=True, default="")
     company_name = models.CharField(max_length=200, blank=True, default="")
     notification_tone = models.CharField(
         max_length=20,

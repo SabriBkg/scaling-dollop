@@ -16,18 +16,22 @@ export default function DpaAcceptancePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    if (isSubmitting) return;
     if (!accountLoading && account) {
       if (account.tier === "free") {
         router.replace("/dashboard");
-      } else if (account.dpa_accepted && account.engine_mode) {
-        router.replace("/dashboard");
       } else if (account.dpa_accepted) {
-        router.replace("/activate/mode");
+        router.replace("/dashboard");
       }
     }
-  }, [account, accountLoading, router]);
+  }, [account, accountLoading, isSubmitting, router]);
 
-  if (accountLoading || !account) {
+  if (
+    accountLoading ||
+    !account ||
+    account.tier === "free" ||
+    account.dpa_accepted
+  ) {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--accent-active)] border-t-transparent" />
@@ -40,7 +44,8 @@ export default function DpaAcceptancePage() {
     try {
       const { data } = await api.post<ApiResponse<Account>>("/account/dpa/accept/");
       queryClient.setQueryData(["account", "me"], data.data);
-      router.push("/activate/mode");
+      queryClient.invalidateQueries({ queryKey: ["account", "me"] });
+      router.push("/dashboard");
     } catch {
       toast.error("Failed to accept the Data Processing Agreement. Please try again.");
       setIsSubmitting(false);

@@ -1,6 +1,8 @@
 # Story 4.1: Resend Integration & Branded Failure Notification Email
 
-Status: review
+Status: needs-regeneration
+
+> **POST-SIMPLIFICATION REGENERATION REQUIRED (2026-04-29).** This file is pre-simplification. The canonical post-simplification ACs live in `_bmad-output/epics.md` (Story 4.1, lines 987–1010) — auto-trigger removed, sends are exclusively client-initiated via the failed-payments dashboard, redirect-link CTA target per FR51. Regenerate this file via SM workflow against the epics.md ACs before development resumes. Existing implementation in `safenet_backend/core/services/email.py` (Story 4.1 + 4.3 partial) remains valid; only the trigger semantics changed.
 
 ## Story
 

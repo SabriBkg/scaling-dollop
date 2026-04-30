@@ -16,37 +16,32 @@ This document provides the complete epic and story breakdown for SafeNet, decomp
 
 ### Functional Requirements
 
-FR1: A new user can connect their Stripe account to SafeNet via OAuth without handling API keys
+> **Post-simplification (2026-04-29).** Retired FR numbers (FR4, FR5, FR11–15, FR40, FR41, FR47) are intentionally absent — they belonged to the v0 retry/mode-toggle scope quarantined to `archive/v0-recovery-engine`. See `_bmad-output/sprint-change-proposal-2026-04-29.md`.
+
+FR1: A new user can connect their Stripe account to SafeNet via OAuth without handling API keys — after OAuth authorization, the user completes a one-time profile setup (name, company name, password) before reaching the dashboard
 FR2: SafeNet can perform a retroactive 90-day payment failure scan immediately after Stripe Connect authorization
-FR3: A client must acknowledge and sign a Data Processing Agreement before the recovery engine is activated
-FR4: A client can choose between Supervised mode and Autopilot mode as their retry authorization model
-FR5: A client can switch between Supervised and Autopilot mode at any time after initial setup
-FR6: SafeNet can detect new failed payment events from a connected Stripe account on an hourly polling cycle
+FR3: A client must acknowledge and sign a Data Processing Agreement before any dunning email is sent on their behalf
+FR6: SafeNet can detect new failed payment events from a connected Stripe account on a daily polling cycle
 FR7: SafeNet can classify each failed payment by its Stripe decline code
 FR8: SafeNet can display a breakdown of all detected failures by decline code category
 FR9: SafeNet can calculate and display an estimated recoverable revenue figure based on detected failures
-FR10: SafeNet can apply distinct recovery rules to each decline code category (retry-only, notify-only, retry+notify, no-action)
-FR11: SafeNet can schedule `insufficient_funds` retries within a 24-hour window after the 1st or 15th of the month
-FR12: SafeNet can enforce a maximum retry count per failure by decline code category: `insufficient_funds` (3 retries), `do_not_honor` / `generic_decline` (2 retries), `card_velocity_exceeded` (1 retry), `card_expired` (0 retries — notify only), all other codes (1 retry unless overridden by rule engine)
-FR13: SafeNet can detect EU/UK payment contexts (identified via Stripe payment method country or customer billing address country) and route them to notify-only, blocking automated retries
-FR14: In Supervised mode, SafeNet queues pending actions for explicit client approval before execution
-FR15: In Autopilot mode, SafeNet executes recovery actions automatically per the rule engine without client intervention
-FR16: SafeNet assigns and displays one of four statuses to each end-customer with a failed payment: Active, Recovered, Passive Churn, Fraud Flagged
-FR17: SafeNet can transition a customer from Active to Recovered when a retry succeeds
-FR18: SafeNet can transition a customer to Passive Churn when the retry cap is exhausted without recovery
-FR19: SafeNet immediately flags a customer as Fraud Flagged and stops all actions when a fraud decline code is detected
+FR10: SafeNet maps each decline code to a recommended dunning email type (Update payment / Retry reminder / Final notice / no-recommendation for fraud-flagged), via a versioned rule engine config
+FR16: SafeNet assigns and displays one of four statuses to each end-customer with a failed payment: Active, Recovered, Passive Churn, Fraud Flagged. Statuses are assigned by daily polling detection (paid → Recovered, cancelled/unpaid/paused → Passive Churn, fraudulent code → Fraud Flagged) and by client manual action (mark resolved → Recovered, exclude → no further recommendation)
+FR17: SafeNet can transition a customer from Active to Recovered when the next daily poll detects payment success, or the client manually marks the failure resolved
+FR18: SafeNet can transition a customer to Passive Churn when the daily poll detects subscription `cancelled`, `unpaid`, `paused`, or `cancel_at_period_end`, or the client manually marks the subscriber as churned
+FR19: SafeNet immediately flags a customer as Fraud Flagged and suppresses all email recommendations when a fraud decline code is detected
 FR20: A client can view the payment history and current status for any individual end-customer
 FR21: A client can manually resolve a Fraud Flagged status and record a resolution reason
 FR22: SafeNet can send a branded email notification to an end-customer when their payment fails
 FR23: A client can select the notification tone from three presets (Professional / Friendly / Minimal)
-FR24: SafeNet can send a final notice email to an end-customer on the last retry attempt, before graduating them to Passive Churn
-FR25: SafeNet can send a payment recovery confirmation email to an end-customer when a retry succeeds
+FR24: SafeNet can send a final notice email to an end-customer when the client triggers a final-notice send on a failed-payment row (manual or via bulk action with email type "Final notice" chosen)
+FR25: SafeNet can send a payment recovery confirmation email to an end-customer when the next daily poll detects payment success or the client marks the failure resolved
 FR26: Every notification sent to an end-customer includes a functional opt-out mechanism
 FR27: SafeNet suppresses all future notifications for an end-customer who has opted out via a SafeNet notification link. All SafeNet notifications are classified as transactional messages (contractual necessity) — a standard marketing opt-out from the client's own communications does not suppress SafeNet notifications.
 FR28: Mid-tier clients' notifications are sent from a SafeNet-managed shared sending domain with the client's brand name in the From field
 FR29: A client's dashboard is populated with retroactive scan data on first login — no empty state
 FR30: A client can view failures segmented by decline code, customer status, and estimated recoverable revenue
-FR31: A client can view recovery analytics showing recovered payments, successful retry attempts, and notifications that drove card updates
+FR31: A client can view recovery analytics showing recovered payments, polling-detected paid-on-retry events (Stripe-side recoveries), and notifications that drove card updates
 FR32: A client can view a month-over-month comparison of failure rate, recovery rate, revenue protected, and Passive Churn count
 FR33: A client can opt in to receive a weekly digest email summarizing recovery activity, active retries, and new Passive Churn flags — disabled by default, togglable from account settings
 FR34: SafeNet sends a triggered onboarding email to the client when their first scan completes
@@ -55,15 +50,20 @@ FR36: SafeNet downgrades a non-converting account to the Free tier after the 30-
 FR37: A Free-tier client can see the time remaining until their next payment scan in the dashboard
 FR38: SafeNet sends a monthly email to active Mid-tier clients showing recovered revenue versus subscription cost
 FR39: A client can upgrade from Free to Mid tier from a single CTA anchored to the estimated recoverable revenue figure
-FR40: The SafeNet operator can view all scheduled retries across all accounts before they fire
-FR41: The SafeNet operator can cancel a scheduled retry and record a reason in the audit log
 FR42: The SafeNet operator can manually advance a customer's status and record the reason
 FR43: SafeNet records every engine action in an append-only audit log with timestamp, actor, and outcome
 FR44: The SafeNet operator can view the full audit log for any customer or account
 FR45: The operator console is accessible only to authenticated SafeNet operators and is not exposed to clients
 FR46: SafeNet can detect when an end-customer's Stripe subscription moves to a non-recoverable state (`cancelled`, `unpaid`, `paused`) or is flagged as `cancel_at_period_end`, and automatically stops all recovery actions, graduating the customer to Passive Churn with the specific reason recorded
-FR47: SafeNet can detect when an end-customer updates their payment method and queue an immediate retry for their most recent Active-status failure, independent of the payday-aware schedule
 FR48: Each client account supports exactly one user at MVP — multi-user access and team invitations are not available
+FR49: After Stripe Connect authorization, a new user must provide their full name, company/SaaS product name, and set a password before accessing the dashboard — this profile completion step is mandatory for first-time users and enables email/password login on subsequent visits
+FR50: A user who forgets their password can recover access via Stripe OAuth re-authentication on the login page; a full email-based password reset flow is available once the transactional email system is operational (Epic 4)
+FR51: A client can configure a redirect link in their account settings; the link is embedded in all dunning emails as the subscriber's "update payment" CTA target (defaults to the Stripe customer portal URL)
+FR52: A client's dashboard shows all failed payments for the current month, with a per-row recommended email type derived from the decline code via the rule engine
+FR53: A client can trigger a dunning email per failed-payment row — accepting the recommended email type or choosing any of {Update payment, Retry reminder, Final notice}
+FR54: A client can multi-select failed-payment rows and trigger a bulk send — either "Send recommended per row" or "Send [chosen type] for all selected", with a confirmation dialog showing count + email types before dispatch
+FR55: A client can manually mark a failed payment as Resolved (transitions subscriber to Recovered with a manual-resolution audit note)
+FR56: Paid-tier clients can provide a custom email body per email type in account settings; the custom body overrides the tone preset for that email type when sending
 
 ### NonFunctional Requirements
 
@@ -73,8 +73,8 @@ NFR-S3: SafeNet stores zero raw cardholder data — only Stripe event metadata (
 NFR-S4: All operator console access requires authentication; the console is not accessible to client accounts
 NFR-S5: All data queries are scoped by tenant identifier at the application layer — no cross-tenant data access is possible through the application
 NFR-S6: Any confirmed security incident triggers a production hotfix within 4 hours of confirmation — no exceptions, no scheduled release queue
-NFR-R1: The hourly polling job executes every 60 minutes (±5 minutes tolerance); a missed cycle triggers an operator alert within 90 minutes
-NFR-R2: Scheduled retries fire within their designated time window with ≤15 minutes variance
+NFR-R1: The daily polling job executes once every 24 hours (±2 hours tolerance); a missed poll triggers an operator alert within 30 hours
+NFR-R2: Marc-triggered email dispatches reach Resend within 5 seconds of the trigger (synchronous queue with async dispatch)
 NFR-R3: Every engine action either succeeds or is logged as failed with a reason — zero silent failures permitted
 NFR-R4: System uptime target: ≥99.5% measured monthly
 NFR-R5: The job queue implements dead-letter handling — failed jobs are captured, logged, and surfaced for operator review rather than silently dropped
@@ -117,56 +117,51 @@ UX-DR1: Implement Story Arc 3-column layout (Detected → In Progress → Recove
 UX-DR2: Build `RecoveryHeroCard` custom component — 56px Inter 700 green hero amount, "Recovered this month" eyebrow, supporting retry count + net benefit line; states: Default / Free tier (estimated recoverable + trial CTA) / Loading skeleton; `aria-label` with full context
 UX-DR3: Build `StoryArcPanel` custom component — 3-column CSS Grid, each column has step indicator + title + hero metric + supporting KPIs + item list; Column 1: neutral, Column 2: blue + estimated recoverable + recovery rate, Column 3: green tint; states: Default / Scan loading skeleton / Zero state
 UX-DR4: Build `AttentionBar` component — conditionally rendered amber strip below topbar; amber warning icon + "N items need your attention" + "Review before next engine cycle in Xm"; named action pills (clickable chips); states: Visible / Hidden / Urgent (fraud flag — deeper amber); `role="alert"` with `aria-live="polite"`
-UX-DR5: Build `EngineStatusIndicator` component — animated pulse dot (blue=active, grey=paused, amber=error); "Autopilot active" / "Supervised" / "Paused" text + "Last scan Xm ago · next in Ym"; topbar right-anchored on all authenticated screens; `aria-live="polite"` on status change
+UX-DR5: Build `PollingStatusIndicator` component — animated pulse dot (blue=healthy, amber=missed-poll alert, grey=DPA-pending); "Last scan Xh ago · next scan in Yh" text (per NFR-R1 daily cadence); topbar right-anchored on all authenticated screens; `aria-live="polite"` on status change
 UX-DR6: Build `WorkspaceIdentity` component — SafeNet wordmark + vertical divider + 2-letter SaaS monogram avatar + SaaS name (bold 13px) + "Marc's workspace" sub-label; left-anchored topbar; always visible on authenticated screens
 UX-DR7: Build `DeclineCodeExplainer` component — maps Stripe codes to plain-language human label + single-sentence popover explanation; code never shown in UI; used in subscriber list, detail panel, StoryArcPanel, review queue
-UX-DR8: Build `BatchActionToolbar` component — selection count + "Apply recommended actions" primary CTA + "Exclude from automation" ghost/destructive + deselect all link; slides up from bottom on row selection; sticky within queue viewport; `role="toolbar"` with keyboard nav
+UX-DR8: Build `BatchActionToolbar` component — selection count + "Send recommended (N)" primary CTA + "Send specific…" type-picker (Update payment / Retry reminder / Final notice) + "Mark resolved (N)" + "Exclude (N)" ghost + deselect all link; slides up from bottom on row selection; sticky within failed-payments list viewport; `role="toolbar"` with keyboard nav; confirmation dialog before dispatch shows count + per-row email type
 UX-DR9: Build `SubscriberCard` component — name (bold) + amount (right-aligned) + email/tier sub-label + plain-language decline reason + status badge; states: Default / Hover (border darkens) / Attention (amber border + ⚠ prefix) / Recovered (green amount); attention-state cards always render first
 UX-DR10: Extend shadcn/ui `Badge` with 4 SafeNet status variants: Recovered (green / `--accent-recovery`), Active (blue / `--accent-active`), Fraud Flagged (red / `--accent-fraud`), Passive Churn (grey / `--accent-neutral`); text label always paired with colour — never colour-only communication
 UX-DR11: Implement full-screen retroactive scan experience — no partial data during scan; animated progress + "Scanning your last 90 days of payment activity"; single-reveal dashboard populate (not incremental); hero metric appears first; post-scan CTA anchored below estimated recoverable figure
 UX-DR12: Implement design token system — CSS custom properties for all 12 semantic tokens in both light and dark variants; wire to shadcn/ui theme switching; extend Tailwind config with SafeNet semantic token aliases; Inter variable font (self-hosted or CDN); `font-variant-numeric: tabular-nums` for all monetary values
 UX-DR13: Implement WCAG AA accessibility throughout — all status badges have `aria-label` with full status text; KPI numbers have `aria-label` with currency + context; all interactive elements have visible focus rings using `--accent-active`; scan animation and reveals respect `prefers-reduced-motion`; no text below 11px; colour-blind safe (text label always paired with colour)
 UX-DR14: Implement responsive layout — desktop (≥1280px): full layout; laptop (1024–1279px): condensed 200px sidebar equiv; tablet (768–1023px): sidebar collapses to icon rail; mobile (<768px): sidebar hidden, top nav, read-only optimised; complex actions (batch review, DPA signing) are desktop-only
-UX-DR15: Implement DPA as a distinct full-page formal screen (not a checkbox) — presented between trial activation and mode selection; explicit sign/accept action; documents what SafeNet processes, on whose behalf, for what purpose; hard gate before engine activation
-UX-DR16: Implement Supervised mode review queue — list with name + plain-language decline reason + recommended action (pre-selected per decline code) + amount at risk; multi-select checkboxes; batch toolbar appears on selection; exclusion requires confirmation dialog; zero-state: "Nothing needs your eyes right now."
+UX-DR15: Implement DPA as a distinct full-page formal screen (not a checkbox) — presented after Stripe Connect + profile completion, before any dunning email can be triggered; explicit sign/accept action; documents what SafeNet processes, on whose behalf, for what purpose; hard gate — a client cannot send a single email until DPA is signed
+UX-DR16: Implement current-month failed-payments list as the dashboard's primary surface — row per failed payment with name + plain-language decline reason + recommended email type (Update payment / Retry reminder / Final notice; per FR10/FR52) + amount at risk + status badge; multi-select checkboxes; per-row "Send recommended" + "Send specific…" + "Mark resolved" + "Exclude" actions; batch toolbar appears on selection (UX-DR8); confirmation dialog before any send; zero-state: "Nothing needs your eyes right now."
 UX-DR17: Implement live notification preview in tone selector settings — Marc sees exactly what subscribers will receive (with his brand name) in real time as tone preset is selected (Professional / Friendly / Minimal); preview updates instantly on preset change
 UX-DR18: Implement affirming zero/empty states for all screens — "You're all clear." (Dashboard / no failures), "Nothing needs your eyes right now." (Review queue), "Your first recovery is coming." (Recovered / no recoveries yet), "Connect Stripe to activate SafeNet." (Settings / no Stripe)
 
 ### FR Coverage Map
 
+> **Post-simplification (2026-04-29).** Retired FR numbers (FR4, FR5, FR11–15, FR40, FR41, FR47) are intentionally absent — see Functional Requirements note above. Epic 3 (v0) is quarantined; v1 dunning work is consolidated under Epic 3 v1 (failed-payments list + email triggers) and Epic 4 (email service + custom-body editor).
+
 | FR | Epic | Area |
 |----|------|------|
 | FR1 | Epic 2 | Stripe Connect OAuth |
 | FR2 | Epic 2 | 90-day retroactive scan |
-| FR3 | Epic 3 | DPA gate before engine activation |
-| FR4 | Epic 3 | Supervised / Autopilot mode selection |
-| FR5 | Epic 3 | Mode switch at any time |
-| FR6 | Epic 2 | Hourly polling failure detection |
+| FR3 | Epic 4 | DPA gate before any dunning email send |
+| FR6 | Epic 2 | Daily polling failure detection |
 | FR7 | Epic 2 | Decline code classification |
 | FR8 | Epic 2 | Failure breakdown by decline code |
 | FR9 | Epic 2 | Estimated recoverable revenue KPI |
-| FR10 | Epic 3 | Code-aware recovery rule application |
-| FR11 | Epic 3 | Payday-aware retry calendar |
-| FR12 | Epic 3 | Per-code retry caps |
-| FR13 | Epic 3 | EU/UK geo-aware compliance layer |
-| FR14 | Epic 3 | Supervised mode pending action queue |
-| FR15 | Epic 3 | Autopilot automatic execution |
-| FR16 | Epic 3 | 4-status customer state machine |
-| FR17 | Epic 3 | Active → Recovered transition |
-| FR18 | Epic 3 | Active → Passive Churn transition |
-| FR19 | Epic 3 | Fraud flag + action stop |
+| FR10 | Epic 3 v1 | Decline-code → recommended dunning email type mapping |
+| FR16 | Epic 3 v1 | 4-status customer state machine (polling + manual transitions) |
+| FR17 | Epic 3 v1 | Active → Recovered transition (poll-detected paid OR manual mark-resolved) |
+| FR18 | Epic 3 v1 | Active → Passive Churn transition (poll-detected cancelled/unpaid/paused OR manual churn) |
+| FR19 | Epic 3 v1 | Fraud flag + email-recommendation suppression |
 | FR20 | Epic 5 | Individual subscriber detail view |
 | FR21 | Epic 5 | Manual fraud flag resolution |
 | FR22 | Epic 4 | Branded failure notification email |
 | FR23 | Epic 4 | Tone selector (3 presets) |
-| FR24 | Epic 4 | Final notice email |
-| FR25 | Epic 4 | Recovery confirmation email |
+| FR24 | Epic 4 | Final notice email (manual or bulk-triggered) |
+| FR25 | Epic 4 | Recovery confirmation email (poll-detected paid OR manual mark-resolved) |
 | FR26 | Epic 4 | Opt-out mechanism in every notification |
-| FR27 | Epic 4 | Opt-out suppression logic |
+| FR27 | Epic 4 | Opt-out suppression logic (transactional classification) |
 | FR28 | Epic 4 | Shared domain sending (SafeNet-managed) |
 | FR29 | Epic 2 | First-login populated dashboard |
 | FR30 | Epic 2 | Failure breakdown / dashboard view |
-| FR31 | Epic 5 | Recovery analytics section |
+| FR31 | Epic 5 | Recovery analytics (poll-detected paid-on-retry events) |
 | FR32 | Epic 5 | Month-over-month comparison |
 | FR33 | Epic 5 | Weekly digest email (opt-in) |
 | FR34 | Epic 2 | Triggered onboarding email post-scan |
@@ -175,15 +170,20 @@ UX-DR18: Implement affirming zero/empty states for all screens — "You're all c
 | FR37 | Epic 2 | "Next scan in X days" indicator |
 | FR38 | Epic 5 | Monthly "SafeNet saved you" billing email |
 | FR39 | Epic 2 | Upgrade CTA anchored to recoverable revenue |
-| FR40 | Epic 6 | Operator: view all scheduled retries |
-| FR41 | Epic 6 | Operator: cancel retry + audit note |
 | FR42 | Epic 6 | Operator: manual status advancement |
 | FR43 | Epic 6 | Append-only audit log (every action) |
 | FR44 | Epic 6 | Operator: full audit log view |
 | FR45 | Epic 6 | Operator console: operator-only access |
-| FR46 | Epic 3 | Subscription cancellation → Passive Churn |
-| FR47 | Epic 3 | Card-update triggered immediate retry |
+| FR46 | Epic 3 v1 | Subscription cancellation → Passive Churn |
 | FR48 | Epic 2 | Single-owner account (no team access at MVP) |
+| FR49 | Epic 2 | Profile completion (full name + company/SaaS name + password) post-OAuth |
+| FR50 | Epic 4 | Password recovery (OAuth re-auth fallback now; email-based reset once Epic 4 ships) |
+| FR51 | Epic 4 | Configurable redirect link embedded in dunning email CTAs |
+| FR52 | Epic 3 v1 | Current-month failed-payments dashboard list with per-row recommended email type |
+| FR53 | Epic 3 v1 | Per-row dunning email trigger (recommended OR client-chosen type) |
+| FR54 | Epic 3 v1 | Bulk send (recommended-per-row OR chosen-type-for-all-selected) with confirmation |
+| FR55 | Epic 3 v1 | Manual mark-resolved → Recovered (with audit note) |
+| FR56 | Epic 4 | Paid-tier custom email body per email type (overrides tone preset) |
 
 ## Epic List
 
@@ -483,7 +483,7 @@ So that my dashboard is populated with real data before I take any action.
 **When** the task finishes
 **Then** first scan data is visible in the dashboard within 5 minutes of Stripe Connect authorization (NFR-P3)
 **And** the dashboard UI is never blocked — the scan runs entirely as a background job (NFR-P2)
-**And** a triggered onboarding email is sent to the client (FR34)
+**And** if the Resend integration is available (Story 4.1 shipped), a triggered onboarding email is sent to the client (FR34); otherwise the dispatch is queued and emitted as soon as Story 4.1 lands — Story 2.2 does not block on Epic 4
 
 **Given** the daily polling job (`poll_new_failures`) is registered with Celery beat
 **When** it runs every 24 hours (±2h tolerance)
@@ -496,20 +496,21 @@ So that my dashboard is populated with real data before I take any action.
 ### Story 2.3: Authenticated Dashboard Shell & Navigation
 
 As an authenticated founder,
-I want a persistent, responsive dashboard layout with always-visible engine status and workspace identity,
-So that I always know SafeNet is running and can navigate confidently between sections.
+I want a persistent, responsive dashboard layout with always-visible polling status and workspace identity,
+So that I always know SafeNet is scanning my Stripe account and can navigate confidently between sections.
 
 **Acceptance Criteria:**
 
 **Given** an authenticated user loads any dashboard page
 **When** the page renders
-**Then** the top navigation bar is visible with: `WorkspaceIdentity` (SafeNet wordmark + vertical divider + 2-letter SaaS monogram + SaaS name + "Marc's workspace"), `EngineStatusIndicator` (right-anchored), and user account menu (UX-DR6, UX-DR5)
-**And** navigation tabs link to: Dashboard, Settings (and Review Queue when in Supervised mode)
+**Then** the top navigation bar is visible with: `WorkspaceIdentity` (SafeNet wordmark + vertical divider + 2-letter SaaS monogram + SaaS name + "Marc's workspace"), `PollingStatusIndicator` (right-anchored), and user account menu (UX-DR6, UX-DR5)
+**And** navigation tabs link to: Dashboard, Settings (no separate review queue — the dashboard's failed-payments list is the primary working surface)
 
-**Given** the `EngineStatusIndicator`
-**When** the engine is active (Autopilot or Supervised)
-**Then** it displays an animated blue pulse dot + "Autopilot active" or "Supervised" + "Last scan Xm ago · next in Ym"
-**And** when the engine is paused or errored, the dot is grey (paused) or amber (error) with appropriate status text
+**Given** the `PollingStatusIndicator`
+**When** polling is healthy (last poll within NFR-R1's 24h ±2h window)
+**Then** it displays an animated blue pulse dot + "Last scan Xh ago · next scan in Yh"
+**And** when the most recent poll is older than 30 hours (NFR-R1 alert threshold), the dot turns amber with "Polling delayed — operator notified"
+**And** when DPA is not yet signed, the dot is grey with "Sign DPA to enable sends"
 **And** status changes are announced via `aria-live="polite"` (UX-DR5, UX-DR13)
 
 **Given** a desktop viewport (≥1280px)
@@ -547,7 +548,7 @@ So that I understand my payment health at a glance and the upgrade value is alwa
 
 **Given** a free-tier client viewing the dashboard
 **When** the estimated recoverable revenue figure is visible
-**Then** a single upgrade CTA is anchored directly below it: "Activate recovery engine — €29/month" (FR39, FR9)
+**Then** a single upgrade CTA is anchored directly below it: "Send your first dunning email — €29/month" (FR39, FR9)
 **And** no other primary CTA competes for attention on the same screen
 
 **Given** the failure breakdown section (FR8, FR30)

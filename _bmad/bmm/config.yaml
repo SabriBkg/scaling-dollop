@@ -1,0 +1,9 @@
+# BMM Module Configuration
+# Generated for bmad-check-implementation-readiness on 2026-04-29
+
+project_name: SafeNet
+user_name: BMad
+communication_language: English
+document_output_language: English
+output_folder: /Users/sabri/github/recoup/_bmad-output
+planning_artifacts: /Users/sabri/github/recoup/_bmad-output

@@ -1,6 +1,8 @@
 # Story 4.2: Tone Selector Settings & Live Notification Preview
 
-Status: done
+Status: needs-regeneration
+
+> **POST-SIMPLIFICATION REGENERATION REQUIRED (2026-04-29).** This file is pre-simplification. The canonical post-simplification ACs live in `_bmad-output/epics.md` (Story 4.2, lines 1014–1048) — adds redirect-link input (FR51) + paid-tier custom email body editor per email type (FR56). Regenerate this file via SM workflow against the epics.md ACs before resuming work on these AC blocks. The existing tone-selector implementation remains valid; the new ACs (FR51, FR56) are additive.
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
