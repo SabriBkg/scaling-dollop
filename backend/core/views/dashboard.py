@@ -1,5 +1,5 @@
 from django.core.cache import cache
-from django.db.models import Count, Sum, Q
+from django.db.models import Count, Sum, Q, OuterRef, Subquery, DateTimeField
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -8,12 +8,15 @@ from rest_framework.response import Response
 from core.engine.labels import DECLINE_CODE_LABELS
 from core.engine.rules import DECLINE_RULES
 from core.engine.state_machine import STATUS_ACTIVE, STATUS_RECOVERED, STATUS_FRAUD_FLAGGED
-
-ATTENTION_ITEMS_CAP = 10
+from core.models.notification import NotificationLog
 from core.models.pending_action import PendingAction, STATUS_PENDING
 from core.models.subscriber import Subscriber, SubscriberFailure
-from core.serializers.dashboard import DashboardSummarySerializer
+from core.serializers.dashboard import (
+    DashboardSummarySerializer,
+    FailedPaymentRowSerializer,
+)
 
+ATTENTION_ITEMS_CAP = 10
 CACHE_TTL = 300  # 5 minutes
 
 
@@ -196,4 +199,89 @@ def dashboard_summary(request):
         cache.set(cache_key, data, CACHE_TTL)
 
     serializer = DashboardSummarySerializer(data)
+    return Response({"data": serializer.data})
+
+
+VALID_SORT_KEYS = {"date", "amount"}
+VALID_SORT_DIRS = {"asc", "desc"}
+SORT_FIELD_MAP = {"date": "failure_created_at", "amount": "amount_cents"}
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def failed_payments_list(request):
+    """Returns current-month failed-payment rows for the authenticated user's account."""
+    try:
+        account = request.user.account
+    except request.user.__class__.account.RelatedObjectDoesNotExist:
+        return Response(
+            {"error": {"code": "NOT_FOUND", "message": "No account found.", "field": None}},
+            status=404,
+        )
+
+    sort = request.GET.get("sort", "date")
+    direction = request.GET.get("dir", "desc")
+    if sort not in VALID_SORT_KEYS:
+        return Response(
+            {"error": {"code": "VALIDATION_ERROR", "message": "Invalid sort param.", "field": "sort"}},
+            status=400,
+        )
+    if direction not in VALID_SORT_DIRS:
+        return Response(
+            {"error": {"code": "VALIDATION_ERROR", "message": "Invalid dir param.", "field": "dir"}},
+            status=400,
+        )
+
+    # v1: month boundary computed in UTC. Per-account timezone deferred to v2.
+    now = timezone.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    last_sent = (
+        NotificationLog.objects.for_account(account.id)
+        .filter(
+            failure_id=OuterRef("pk"),
+            subscriber_id=OuterRef("subscriber_id"),
+            status="sent",
+        )
+        .order_by("-created_at")
+        .values("created_at")[:1]
+    )
+
+    failures = (
+        SubscriberFailure.objects.for_account(account.id)
+        .filter(failure_created_at__gte=month_start)
+        .select_related("subscriber")
+        .annotate(
+            last_email_sent_at=Subquery(last_sent, output_field=DateTimeField())
+        )
+    )
+
+    order_field = SORT_FIELD_MAP[sort]
+    if direction == "desc":
+        order_field = f"-{order_field}"
+    failures = failures.order_by(order_field, "-id")
+
+    results = []
+    for f in failures:
+        sub = f.subscriber
+        results.append({
+            "id": f.id,
+            "subscriber_id": sub.id,
+            "subscriber_email": sub.email or "",
+            "subscriber_stripe_customer_id": sub.stripe_customer_id,
+            "subscriber_status": sub.status,
+            "decline_code": f.decline_code,
+            "decline_reason": DECLINE_CODE_LABELS.get(
+                f.decline_code, DECLINE_CODE_LABELS["_default"]
+            ),
+            "amount_cents": f.amount_cents,
+            "failure_created_at": f.failure_created_at,
+            # recommended_email_type set to None until Story 3.5 v1 lands the rule engine.
+            "recommended_email_type": None,
+            "last_email_sent_at": f.last_email_sent_at,
+            "payment_method_country": f.payment_method_country,
+            "excluded_from_automation": sub.excluded_from_automation,
+        })
+
+    serializer = FailedPaymentRowSerializer(results, many=True)
     return Response({"data": serializer.data})

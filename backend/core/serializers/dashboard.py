@@ -27,3 +27,19 @@ class DashboardSummarySerializer(serializers.Serializer):
     decline_breakdown = DeclineBreakdownEntrySerializer(many=True)
     pending_action_count = serializers.IntegerField()
     attention_items = AttentionItemSerializer(many=True)
+
+
+class FailedPaymentRowSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    subscriber_id = serializers.IntegerField()
+    subscriber_email = serializers.CharField(allow_blank=True, allow_null=True)
+    subscriber_stripe_customer_id = serializers.CharField(allow_blank=True)
+    subscriber_status = serializers.CharField()
+    decline_code = serializers.CharField(allow_blank=True)
+    decline_reason = serializers.CharField()
+    amount_cents = serializers.IntegerField()
+    failure_created_at = serializers.DateTimeField()
+    recommended_email_type = serializers.CharField(allow_null=True)
+    last_email_sent_at = serializers.DateTimeField(allow_null=True)
+    payment_method_country = serializers.CharField(allow_null=True, allow_blank=True)
+    excluded_from_automation = serializers.BooleanField()
