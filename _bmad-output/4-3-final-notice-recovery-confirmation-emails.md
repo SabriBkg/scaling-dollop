@@ -1,6 +1,8 @@
 # Story 4.3: Final Notice & Recovery Confirmation Emails
 
-Status: done
+Status: needs-regeneration
+
+> **POST-SIMPLIFICATION REGENERATION REQUIRED (2026-04-29).** This file is pre-simplification. The canonical post-simplification ACs live in `_bmad-output/epics.md` (Story 4.3, lines 1052–1077) — final notice is client-triggered (per-row or bulk with email type "Final notice"); recovery confirmation is polling-detected or manual-resolve-driven (no FSM auto-transition signal). Regenerate this file via SM workflow against the epics.md ACs before development resumes.
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

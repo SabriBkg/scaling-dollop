@@ -1,5 +1,5 @@
 ---
-stepsCompleted: [step-01-init, step-02-discovery, step-02b-vision, step-02c-executive-summary, step-03-success, step-04-journeys, step-05-domain, step-06-innovation, step-07-project-type, step-08-scoping, step-09-functional, step-10-nonfunctional, step-11-polish, step-12-complete]
+stepsCompleted: [step-01-init, step-02-discovery, step-02b-vision, step-02c-executive-summary, step-03-success, step-04-journeys, step-05-domain, step-06-innovation, step-07-project-type, step-08-scoping, step-09-functional, step-10-nonfunctional, step-11-polish, step-12-complete, step-e-01-discovery, step-e-02-review, step-e-03-edit]
 inputDocuments:
   - brainstorming/brainstorming-session-2026-04-03-safenet.md
 briefCount: 0
@@ -13,6 +13,10 @@ classification:
   complexity: high
   projectContext: greenfield
 project_name: SafeNet
+lastEdited: 2026-04-29
+editHistory:
+  - date: 2026-04-29
+    changes: 'IR drift reconciliation — propagate 2026-04-29 simplification into MVP Feature Set, Implementation Considerations, Risk Mitigation, and FR31 (8 edits per implementation-readiness-report-2026-04-29.md D-PRD-1..D-PRD-8)'
 ---
 
 # Product Requirements Document - SafeNet
@@ -374,7 +378,7 @@ SafeNet is a single-tenant B2B SaaS at MVP. Each client account maps to one Stri
 ### Implementation Considerations
 
 - **Backend:** Python + Django. Django admin panel serves as the internal operator tool (override panel, audit log viewer) at MVP — no custom admin UI needed.
-- **Scheduler:** Celery + Redis for the hourly polling job and retry execution. Fully locally testable against Stripe test mode.
+- **Scheduler:** Celery + Redis for the daily polling job. Fully locally testable against Stripe test mode.
 - **Database:** PostgreSQL. All financial event metadata stored with ACID compliance. Tenant isolation enforced at query level via `account_id` scoping.
 - **Frontend:** Next.js. Dashboard is the primary client interface. No mobile-first requirement — target users are on desktop when reviewing payment health.
 - **Local dev:** Docker Compose. One command spins up Django + Celery + Redis + PostgreSQL + Stripe CLI webhook listener. Identical to production environment.
@@ -397,7 +401,7 @@ SafeNet is a single-tenant B2B SaaS at MVP. Each client account maps to one Stri
 - Journey 1: Founder onboarding → 90-day scan → 30-day proof cycle → upgrade
 - Journey 2: Fraud flag detection → safe stop → manual resolution
 - Journey 3: End-customer notification → card update → recovery confirmation
-- Journey 4: Operator override panel → manual retry cancellation → audit trail
+- Journey 4: Operator audit log spot-check → manual status advancement (edge cases polling misses)
 
 **Must-have capabilities (nothing ships without these):**
 
@@ -407,10 +411,9 @@ SafeNet is a single-tenant B2B SaaS at MVP. Each client account maps to one Stri
 | 90-day retroactive scanner | Empty first-login kills free tier conversion |
 | Decline-code rule engine (30+ codes) | Core differentiator — removes it and SafeNet is just another retry tool |
 | Four-status state machine | Operational integrity — SafeNet must know the state of every customer |
-| Payday-aware retry calendar | Primary `insufficient_funds` differentiator |
 | Geo-aware compliance layer | Non-negotiable for EU clients — legal requirement |
 | GDPR notification flows + DPA gate | Hard compliance requirement before first paying client |
-| Supervised / Autopilot toggle | Liability and trust — clients must explicitly own their retry authorization model |
+| DPA gate + per-row send authorization | Liability — every email send is an explicit client action, not an automated dispatch |
 | AES-256 token encryption + env-key storage | Security non-negotiable — see 2am hotfix threshold |
 | Free + Mid tier + 30-day trial + degraded fallback | Business model requires both tiers to work at launch |
 | Internal admin override panel | Operational safety net during early operation |
@@ -425,10 +428,10 @@ See **Product Scope → Growth Features** and **Vision** sections for the full p
 
 | Risk | Severity | Mitigation |
 |------|----------|-----------|
-| Rule engine misclassifies a decline code | High | Conservative defaults — unknown codes route to fixed-delay retry + notify, never fraud flag. Fraud flag requires exact code match only. |
-| Celery polling job silently fails | High | Dead-letter queue + alerting on missed polling cycles. Operator email alert if no poll in 90 minutes. |
+| Rule engine misclassifies a decline code | High | Conservative defaults — unknown codes route to notify-only with conservative recommended type (Update payment), never fraud flag. Fraud flag requires exact code match only. |
+| Celery polling job silently fails | High | Dead-letter queue + alerting on missed polling cycles. Operator email alert if no poll in 30 hours (per NFR-R1). |
 | Stripe API rate limits hit during retroactive scan | Medium | 90-day scan runs as a background job with exponential backoff. Never blocks the UI. |
-| Railway downtime during scheduled retry window | Medium | Celery retries with jitter on infrastructure failure. Missed retry flagged in audit log. |
+| Railway downtime during polling window | Medium | Celery beat reschedules missed polling tick on next available worker; missed-poll alerting via NFR-R1. |
 
 **Market risks:**
 
@@ -512,7 +515,7 @@ See **Product Scope → Growth Features** and **Vision** sections for the full p
 
 - **FR29:** A client's dashboard is populated with retroactive scan data on first login — no empty state
 - **FR30:** A client can view failures segmented by decline code, customer status, and estimated recoverable revenue
-- **FR31:** A client can view recovery analytics showing recovered payments, successful retry attempts, and notifications that drove card updates
+- **FR31:** A client can view recovery analytics showing recovered payments, polling-detected paid-on-retry events (Stripe-side recoveries), and notifications that drove card updates
 - **FR32:** A client can view a month-over-month comparison of failure rate, recovery rate, revenue protected, and Passive Churn count
 - **FR33:** A client can opt in to receive a weekly digest email summarizing recovery activity, active retries, and new Passive Churn flags — disabled by default, togglable from account settings
 - **FR34:** SafeNet sends a triggered onboarding email to the client when their first scan completes

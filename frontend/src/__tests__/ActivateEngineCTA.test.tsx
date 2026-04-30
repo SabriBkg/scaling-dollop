@@ -25,7 +25,9 @@ describe("ActivateEngineCTA", () => {
     mockUseAccount.mockReset();
   });
 
-  it("renders for mid-tier accounts without DPA", () => {
+  it("renders the DPA-sign CTA for mid-tier accounts without DPA", () => {
+    // v1: the only activation step is DPA acceptance — there is no
+    // "select recovery mode" step. Unsigned Mid users see a Sign CTA.
     mockUseAccount.mockReturnValue({
       data: {
         id: 1,
@@ -37,10 +39,15 @@ describe("ActivateEngineCTA", () => {
     });
 
     render(<ActivateEngineCTA />, { wrapper: createWrapper() });
-    expect(screen.getByText("Activate recovery engine")).toBeInTheDocument();
+    expect(
+      screen.getByText("Sign the Data Processing Agreement"),
+    ).toBeInTheDocument();
   });
 
-  it("renders for mid-tier accounts with DPA but no mode selected", () => {
+  it("does not render for mid-tier accounts that have already signed the DPA", () => {
+    // v1: once DPA is signed there is no further activation step. Rendering
+    // a "Select recovery mode" CTA would link to the /activate/mode redirect
+    // stub and bounce the user back to the dashboard in a loop.
     mockUseAccount.mockReturnValue({
       data: {
         id: 1,
@@ -51,8 +58,8 @@ describe("ActivateEngineCTA", () => {
       isLoading: false,
     });
 
-    render(<ActivateEngineCTA />, { wrapper: createWrapper() });
-    expect(screen.getByText("Select recovery mode")).toBeInTheDocument();
+    const { container } = render(<ActivateEngineCTA />, { wrapper: createWrapper() });
+    expect(container.innerHTML).toBe("");
   });
 
   it("does not render for free-tier accounts", () => {

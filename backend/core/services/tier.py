@@ -20,6 +20,7 @@ def get_polling_frequency(account) -> int:
     return POLLING_FREQ_DAILY
 
 
+# Legacy from quarantined v0 (engine_mode). v1 send endpoints gate on require_dpa_accepted() instead — see core/services/dpa.py.
 def is_engine_active(account) -> bool:
     """True only when Mid/Pro tier, DPA accepted, and engine mode selected."""
     return (

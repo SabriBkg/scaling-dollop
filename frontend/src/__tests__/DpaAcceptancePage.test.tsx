@@ -72,31 +72,16 @@ describe("DpaAcceptancePage", () => {
     expect(container.querySelector(".animate-spin")).toBeInTheDocument();
   });
 
-  it("redirects to /activate/mode if DPA already accepted", () => {
+  it("redirects to /dashboard if DPA already accepted", () => {
+    // v1: post-accept lands on the failed-payments dashboard, not /activate/mode.
     mockUseAccount.mockReturnValue({
       data: {
         id: 1,
         tier: "mid",
         dpa_accepted: true,
         dpa_accepted_at: "2026-04-14T00:00:00Z",
+        dpa_version: "v1.0-2026-04-29",
         engine_mode: null,
-        company_name: "TestCo",
-      },
-      isLoading: false,
-    });
-
-    render(<DpaAcceptancePage />, { wrapper: createWrapper() });
-    expect(mockReplace).toHaveBeenCalledWith("/activate/mode");
-  });
-
-  it("redirects to dashboard if DPA accepted and engine active", () => {
-    mockUseAccount.mockReturnValue({
-      data: {
-        id: 1,
-        tier: "mid",
-        dpa_accepted: true,
-        dpa_accepted_at: "2026-04-14T00:00:00Z",
-        engine_mode: "autopilot",
         company_name: "TestCo",
       },
       isLoading: false,

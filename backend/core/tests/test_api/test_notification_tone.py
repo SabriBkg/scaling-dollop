@@ -73,15 +73,18 @@ class TestSetNotificationTone:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "DPA_NOT_ACCEPTED"
 
-    def test_rejected_when_engine_mode_not_set(self, auth_client, account):
+    def test_allowed_when_engine_mode_not_set(self, auth_client, account):
+        # v1: engine_mode is no longer a gate for tone changes — DPA acceptance is
+        # the sole gate (Story 3.1 v1). A Mid-tier user with DPA accepted but no
+        # engine_mode (the canonical v1 state) MUST be able to change tone.
         account.tier = "mid"
         account.dpa_accepted_at = timezone.now()
         account.engine_mode = None
         account.save()
 
         response = auth_client.post(self.URL, {"tone": "friendly"}, format="json")
-        assert response.status_code == 403
-        assert response.json()["error"]["code"] == "ENGINE_MODE_NOT_SET"
+        assert response.status_code == 200
+        assert response.json()["data"]["notification_tone"] == "friendly"
 
     def test_requires_authentication(self, db):
         client = APIClient()

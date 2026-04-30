@@ -28,6 +28,7 @@ export interface Account {
   profile_complete: boolean;
   dpa_accepted: boolean;
   dpa_accepted_at: string | null;
+  dpa_version: string | null;
   engine_mode: "autopilot" | "supervised" | null;
   notification_tone: NotificationTone;
   created_at: string; // ISO 8601

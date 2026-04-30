@@ -64,6 +64,21 @@ class TestIsEngineActive:
         from core.services.tier import is_engine_active
         assert is_engine_active(account) is False
 
+    def test_is_engine_active_remains_v0_semantics(self, account):
+        # Locks v0 semantics in place: even with Mid tier and DPA accepted,
+        # is_engine_active() returns False without engine_mode. v1 send
+        # endpoints (Stories 3.3 / 3.4) gate on require_dpa_accepted() instead
+        # — see core/services/dpa.py. A future dev removing engine_mode MUST
+        # update this test consciously, not silently.
+        from django.utils import timezone
+        from core.services.tier import is_engine_active
+
+        account.tier = TIER_MID
+        account.dpa_accepted_at = timezone.now()
+        account.engine_mode = None
+        account.save()
+        assert is_engine_active(account) is False
+
 
 @pytest.mark.django_db
 class TestCheckAndDegradeTrial:
