@@ -105,6 +105,8 @@ REST_FRAMEWORK = {
         "auth": "5/min",
         "profile": "3/min",
         "password_reset": "3/hour",  # Story 4.5 — 3 requests/email/hour
+        "send_email": "10/min",  # Story 3.3 v1 — per-user cap on client-manual sends
+        "mark_resolved": "10/min",  # Story 3.3 v1 — sibling cap on manual resolve
     },
 }
 

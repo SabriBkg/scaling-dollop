@@ -2,9 +2,16 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowDownIcon, ArrowUpIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -16,7 +23,10 @@ import {
 import { StatusBadge } from "@/components/subscriber/StatusBadge";
 import { useAccount } from "@/hooks/useAccount";
 import { useDpaGate } from "@/hooks/useDpaGate";
+import { useExcludeSubscriber } from "@/hooks/useExcludeSubscriber";
 import { useFailedPayments } from "@/hooks/useFailedPayments";
+import { useMarkResolved } from "@/hooks/useMarkResolved";
+import { useSendEmail, type SendableEmailType } from "@/hooks/useSendEmail";
 import { cn } from "@/lib/utils";
 import {
   formatCurrency,
@@ -30,8 +40,17 @@ import type {
   SortKey,
 } from "@/types/failed_payment";
 
-const PLACEHOLDER_TOOLTIP = "Coming in next release";
 const TIER_TOOLTIP = "Upgrade to Mid or Pro to enable email actions";
+
+const SPECIFIC_EMAIL_OPTIONS: Array<{ type: SendableEmailType; label: string }> = [
+  { type: "update_payment", label: "Update payment" },
+  { type: "retry_reminder", label: "Retry reminder" },
+  { type: "final_notice", label: "Final notice" },
+];
+
+function labelFor(t: SendableEmailType): string {
+  return SPECIFIC_EMAIL_OPTIONS.find((o) => o.type === t)?.label ?? t;
+}
 
 const RECOMMENDED_EMAIL_LABELS: Record<
   Exclude<RecommendedEmailType, null>,
@@ -146,38 +165,142 @@ function EmptyState() {
 }
 
 function ActionButtons({
-  disabled,
-  tooltip,
+  row,
+  gateDisabled,
+  gateTooltip,
 }: {
-  disabled: boolean;
-  tooltip: string;
+  row: FailedPayment;
+  gateDisabled: boolean;
+  gateTooltip: string | undefined;
 }) {
+  const sendEmail = useSendEmail();
+  const markResolved = useMarkResolved();
+  const exclude = useExcludeSubscriber();
+
+  const sendingEmailType = sendEmail.isPending
+    ? sendEmail.variables?.emailType ?? null
+    : null;
+  const isPending = sendEmail.isPending || markResolved.isPending || exclude.isPending;
+  const sendDisabled = gateDisabled || isPending;
+  const recommendedDisabled = sendDisabled || row.recommended_email_type === null;
+  const recommendedTitle =
+    row.recommended_email_type === null
+      ? "No recommendation available yet"
+      : gateTooltip;
+
+  const handleSend = (emailType: SendableEmailType) => {
+    sendEmail.mutate(
+      { subscriberId: row.subscriber_id, failureId: row.id, emailType },
+      {
+        onSuccess: () => {
+          toast.success(`Queued ${labelFor(emailType)} email.`);
+        },
+        onError: (err) => {
+          if (err.code === "RATE_LIMITED") {
+            const seconds = err.retryAfterSeconds ?? 60;
+            toast.error(`Rate limit reached. Try again in ${seconds}s.`, { duration: 6000 });
+          } else if (err.code === "OPT_OUT") {
+            toast.error("Subscriber has opted out of notifications.", { duration: 6000 });
+          } else if (err.code === "EXCLUDED") {
+            toast.error("Subscriber is excluded from automation.", { duration: 6000 });
+          } else if (err.code === "DPA_REQUIRED") {
+            toast.error("Sign the DPA to enable email sends.", { duration: Infinity });
+          } else {
+            toast.error(err.message || "Failed to queue email.", { duration: 6000 });
+          }
+        },
+      },
+    );
+  };
+
+  const handleMarkResolved = () => {
+    markResolved.mutate(row.subscriber_id, {
+      onSuccess: () => toast.success("Marked as resolved."),
+      onError: () => toast.error("Failed to mark resolved.", { duration: 6000 }),
+    });
+  };
+
+  const handleExclude = () => {
+    exclude.mutate(row.subscriber_id, {
+      onSuccess: () => toast.success("Excluded from future recommendations."),
+      onError: () => toast.error("Failed to exclude subscriber.", { duration: 6000 }),
+    });
+  };
+
   return (
     <div className="flex justify-end gap-1">
-      {(["Send", "Mark resolved", "Exclude"] as const).map((label) => (
-        <Button
-          key={label}
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          title={tooltip}
-          aria-label={label}
-        >
-          {label}
-        </Button>
-      ))}
+      <Button
+        size="sm"
+        variant="default"
+        disabled={recommendedDisabled}
+        title={recommendedTitle}
+        onClick={() =>
+          row.recommended_email_type !== null && handleSend(row.recommended_email_type)
+        }
+        aria-label="Send recommended"
+      >
+        {sendingEmailType !== null && sendingEmailType === row.recommended_email_type
+          ? "Sending…"
+          : "Send recommended"}
+      </Button>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={sendDisabled}
+            title={gateTooltip}
+            aria-label="Send specific email"
+          >
+            <ChevronDownIcon className="h-3 w-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {SPECIFIC_EMAIL_OPTIONS.map((opt) => (
+            <DropdownMenuItem
+              key={opt.type}
+              disabled={sendDisabled}
+              onSelect={() => handleSend(opt.type)}
+            >
+              {opt.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={sendDisabled}
+        title={gateTooltip}
+        aria-label="Mark resolved"
+        onClick={handleMarkResolved}
+      >
+        Mark resolved
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={sendDisabled}
+        title={gateTooltip}
+        aria-label="Exclude"
+        onClick={handleExclude}
+      >
+        Exclude
+      </Button>
     </div>
   );
 }
 
 function PaymentRow({
   row,
-  actionsDisabled,
-  actionsTooltip,
+  gateDisabled,
+  gateTooltip,
 }: {
   row: FailedPayment;
-  actionsDisabled: boolean;
-  actionsTooltip: string;
+  gateDisabled: boolean;
+  gateTooltip: string | undefined;
 }) {
   const isFraud = row.subscriber_status === "fraud_flagged";
   const subscriberLabel = row.subscriber_email || row.subscriber_stripe_customer_id;
@@ -218,7 +341,7 @@ function PaymentRow({
         )}
       </TableCell>
       <TableCell>
-        <ActionButtons disabled={actionsDisabled} tooltip={actionsTooltip} />
+        <ActionButtons row={row} gateDisabled={gateDisabled} gateTooltip={gateTooltip} />
       </TableCell>
     </TableRow>
   );
@@ -231,15 +354,15 @@ export function FailedPaymentsList() {
   const { data: account } = useAccount();
   const isFree = account?.tier === "free";
 
-  // Tooltip precedence: tier > DPA > placeholder. Stories 3.3/3.4 lift the
-  // placeholder gate; for 3.2 every action button is a disabled placeholder.
-  let actionsTooltip = PLACEHOLDER_TOOLTIP;
+  // Tooltip precedence: tier > DPA. Story 3.3 v1 wires real mutations;
+  // each per-row mutation hook surfaces its own pending state and toast.
+  let gateTooltip: string | undefined = undefined;
   if (isFree) {
-    actionsTooltip = TIER_TOOLTIP;
+    gateTooltip = TIER_TOOLTIP;
   } else if (sendDisabled && dpaTooltip) {
-    actionsTooltip = dpaTooltip;
+    gateTooltip = dpaTooltip;
   }
-  const actionsDisabled = true;
+  const gateDisabled = isFree || sendDisabled;
 
   return (
     <section>
@@ -306,8 +429,8 @@ export function FailedPaymentsList() {
               <PaymentRow
                 key={row.id}
                 row={row}
-                actionsDisabled={actionsDisabled}
-                actionsTooltip={actionsTooltip}
+                gateDisabled={gateDisabled}
+                gateTooltip={gateTooltip}
               />
             ))}
           </TableBody>

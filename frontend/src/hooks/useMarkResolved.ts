@@ -3,18 +3,19 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
 
-interface ExcludeResult {
-  excluded: boolean;
+interface MarkResolvedResult {
+  resolved: boolean;
   subscriber_id: number;
+  from_status: string;
+  to_status: "recovered";
 }
 
-export function useExcludeSubscriber() {
+export function useMarkResolved() {
   const queryClient = useQueryClient();
-
-  return useMutation<ExcludeResult, Error, number>({
+  return useMutation<MarkResolvedResult, Error, number>({
     mutationFn: async (subscriberId) => {
-      const { data } = await api.post<{ data: ExcludeResult }>(
-        `/subscribers/${subscriberId}/exclude/`
+      const { data } = await api.post<{ data: MarkResolvedResult }>(
+        `/subscribers/${subscriberId}/mark-resolved/`,
       );
       return data.data;
     },

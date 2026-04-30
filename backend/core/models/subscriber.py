@@ -44,6 +44,21 @@ class Subscriber(TenantScopedModel):
         """Transition active → fraud_flagged on fraudulent decline code."""
         pass
 
+    @transition(
+        field=status,
+        source=[STATUS_ACTIVE, STATUS_PASSIVE_CHURN, STATUS_FRAUD_FLAGGED],
+        target=STATUS_RECOVERED,
+    )
+    def mark_resolved_manually(self):
+        """Story 3.3 v1 — client manually marks a failure as resolved.
+
+        Allowed from any non-recovered state. Source list deliberately
+        excludes STATUS_RECOVERED so calling on an already-recovered
+        subscriber raises TransitionNotAllowed (caught at the view as
+        400 INVALID_TRANSITION).
+        """
+        pass
+
     class Meta:
         db_table = "core_subscriber"
         constraints = [

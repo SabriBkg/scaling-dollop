@@ -471,4 +471,7 @@ class TestPasswordResetConfirm:
         assert r.status_code == 429
         body = r.json()["error"]
         assert body["code"] == "RATE_LIMITED"
-        assert body["message"] == "Too many password reset requests. Try again later."
+        # Story 3.3 v1: throttled-message map keys on scope. PasswordResetConfirmThrottle
+        # uses scope="auth" (rate-shared with login), which has no specific message,
+        # so the generic fallback applies.
+        assert body["message"] == "Too many requests. Try again later."

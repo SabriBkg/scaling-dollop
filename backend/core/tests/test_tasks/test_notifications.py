@@ -10,6 +10,7 @@ from core.models.notification import NotificationLog, NotificationOptOut
 from core.models.subscriber import Subscriber, SubscriberFailure
 from core.models.account import StripeConnection, TIER_MID, TIER_FREE
 from core.tasks.notifications import (
+    send_dunning_email,
     send_failure_notification,
     send_final_notice,
     send_recovery_confirmation,
@@ -656,3 +657,101 @@ class TestOptOutSuppressesAllEmailTypes:
             status="suppressed", email_type=email_type,
         )
         assert log.metadata["reason"] == "opt_out"
+
+
+@pytest.mark.django_db
+class TestSendDunningEmail:
+    """Story 3.3 v1 — client-triggered dunning email task."""
+
+    @patch("core.tasks.notifications.send_notification_email")
+    def test_routes_update_payment_to_failure_email_builder(self, mock_send, failure):
+        mock_send.return_value = "resend_id_X"
+        send_dunning_email(failure.id, "update_payment")
+        mock_send.assert_called_once()
+        args = mock_send.call_args[0]
+        assert args[0] == failure.subscriber
+        assert args[1] == failure
+        assert args[2] == failure.account
+        log = NotificationLog.objects.get(email_type="update_payment", status="sent")
+        assert log.resend_message_id == "resend_id_X"
+
+    @patch("core.tasks.notifications.send_notification_email")
+    def test_routes_retry_reminder_to_failure_email_builder(self, mock_send, failure):
+        mock_send.return_value = "resend_id_Y"
+        send_dunning_email(failure.id, "retry_reminder")
+        mock_send.assert_called_once()
+        log = NotificationLog.objects.get(email_type="retry_reminder", status="sent")
+        assert log.resend_message_id == "resend_id_Y"
+
+    @patch("core.tasks.notifications.send_final_notice_email")
+    @patch("core.tasks.notifications.send_notification_email")
+    def test_routes_final_notice_to_final_notice_email_builder(
+        self, mock_failure_email, mock_final_email, failure
+    ):
+        mock_final_email.return_value = "resend_id_FN"
+        send_dunning_email(failure.id, "final_notice")
+        mock_final_email.assert_called_once()
+        mock_failure_email.assert_not_called()
+        log = NotificationLog.objects.get(email_type="final_notice", status="sent")
+        assert log.resend_message_id == "resend_id_FN"
+
+    @patch("core.tasks.notifications.send_notification_email")
+    @patch("core.tasks.notifications.send_final_notice_email")
+    def test_unknown_type_returns_silently(
+        self, mock_final_email, mock_failure_email, failure
+    ):
+        send_dunning_email(failure.id, "banana")
+        mock_final_email.assert_not_called()
+        mock_failure_email.assert_not_called()
+        assert NotificationLog.objects.count() == 0
+
+    @patch("core.tasks.notifications.send_notification_email")
+    def test_bypasses_engine_active_gate(self, mock_send, failure):
+        """engine_mode=None → is_engine_active=False, but bypass keeps the send."""
+        account = failure.account
+        account.engine_mode = None
+        account.save(update_fields=["engine_mode"])
+        mock_send.return_value = "resend_id_Z"
+        send_dunning_email(failure.id, "update_payment")
+        mock_send.assert_called_once()
+        assert NotificationLog.objects.filter(
+            email_type="update_payment", status="sent"
+        ).exists()
+
+    @patch("core.tasks.notifications.send_notification_email")
+    def test_still_runs_other_gates_no_email(self, mock_send, failure):
+        """Gate 2 (no_email) still runs — bypass only skips Gate 1."""
+        sub = failure.subscriber
+        sub.email = ""
+        sub.save(update_fields=["email"])
+        send_dunning_email(failure.id, "update_payment")
+        mock_send.assert_not_called()
+        log = NotificationLog.objects.get(
+            status="suppressed", email_type="update_payment"
+        )
+        assert log.metadata["reason"] == "no_email"
+
+    @patch("core.tasks.notifications.send_notification_email")
+    def test_audit_metadata_includes_trigger_client_manual(self, mock_send, failure):
+        mock_send.return_value = "resend_id_Q"
+        send_dunning_email(failure.id, "update_payment")
+        audit = AuditLog.objects.filter(action="notification_sent").first()
+        assert audit is not None
+        assert audit.metadata["trigger"] == "client_manual"
+        assert audit.metadata["email_type"] == "update_payment"
+
+    @patch("core.tasks.notifications.send_notification_email")
+    def test_existing_failure_notification_unchanged_by_passes_gates_signature(
+        self, mock_send, failure
+    ):
+        """Default bypass_engine_active=False preserves v0 behavior — engine_mode=None
+        suppresses with reason=engine_not_active, NOT a default bypass."""
+        account = failure.account
+        account.engine_mode = None
+        account.save(update_fields=["engine_mode"])
+        send_failure_notification(failure.id)
+        mock_send.assert_not_called()
+        log = NotificationLog.objects.get(
+            status="suppressed", email_type="failure_notice"
+        )
+        assert log.metadata["reason"] == "engine_not_active"

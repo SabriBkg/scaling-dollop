@@ -3,7 +3,23 @@ from rest_framework.views import exception_handler
 from rest_framework.response import Response
 
 
-_THROTTLED_MESSAGE = "Too many password reset requests. Try again later."
+_THROTTLED_MESSAGES = {
+    "password_reset": "Too many password reset requests. Try again later.",
+    "send_email": "Too many email send requests. Try again later.",
+    "mark_resolved": "Too many resolve actions. Try again later.",
+}
+_THROTTLED_DEFAULT_MESSAGE = "Too many requests. Try again later."
+
+
+def _throttled_message(exc, context) -> str:
+    view = context.get("view") if context else None
+    scope = None
+    if view is not None:
+        for cls in getattr(view, "throttle_classes", []) or []:
+            scope = getattr(cls, "scope", None)
+            if scope:
+                break
+    return _THROTTLED_MESSAGES.get(scope, _THROTTLED_DEFAULT_MESSAGE)
 
 
 def custom_exception_handler(exc, context):
@@ -16,7 +32,7 @@ def custom_exception_handler(exc, context):
     if response is not None:
         code = _get_error_code(exc)
         if isinstance(exc, Throttled):
-            message = _THROTTLED_MESSAGE
+            message = _throttled_message(exc, context)
         else:
             message = _get_error_message(response.data)
         error_data = {

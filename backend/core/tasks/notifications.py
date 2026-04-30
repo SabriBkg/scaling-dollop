@@ -28,7 +28,13 @@ from core.services.tier import is_engine_active
 logger = logging.getLogger(__name__)
 
 
-def _passes_gates(subscriber, failure, account, *, email_type: str, log_label: str) -> bool:
+def _passes_gates(
+    subscriber, failure, account,
+    *,
+    email_type: str,
+    log_label: str,
+    bypass_engine_active: bool = False,
+) -> bool:
     """Run the shared 5-gate check sequence; return True iff the send may proceed.
 
     Side-effects: writes NotificationLog + audit rows for each gate that
@@ -36,8 +42,10 @@ def _passes_gates(subscriber, failure, account, *, email_type: str, log_label: s
     helpers are kept inline so each gate's "why we skipped" log line stays
     readable.
     """
-    # Gate 1: Engine must be active (Mid/Pro + DPA + engine mode)
-    if not is_engine_active(account):
+    # Gate 1: Engine must be active (Mid/Pro + DPA + engine mode).
+    # v1 client-manual sends bypass this gate — DPA is enforced at the view
+    # boundary via require_dpa_accepted(); engine_mode is moot in v1.
+    if not bypass_engine_active and not is_engine_active(account):
         _log_suppression(subscriber, failure, account, reason="engine_not_active", email_type=email_type)
         return False
 
@@ -370,6 +378,109 @@ def send_recovery_confirmation(self, failure_id: int):
             _record_failure(subscriber, failure, account, exc, email_type=email_type, task_name="send_recovery_confirmation")
             return
 
+        raise self.retry(exc=exc)
+
+
+CLIENT_MANUAL_EMAIL_TYPES = ("update_payment", "retry_reminder", "final_notice")
+
+
+@app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_dunning_email(self, failure_id: int, email_type: str):
+    """Send a client-triggered dunning email (Story 3.3 v1).
+
+    Routes to the correct email-builder by email_type and persists a
+    NotificationLog row keyed on (failure, email_type). Bypasses
+    Gate 1 (engine_active) — DPA is enforced at the view boundary.
+    """
+    logger.info("[send_dunning_email] START failure_id=%s email_type=%s", failure_id, email_type)
+
+    if email_type not in CLIENT_MANUAL_EMAIL_TYPES:
+        logger.error("[send_dunning_email] Unknown email_type=%s — refusing", email_type)
+        return
+
+    try:
+        failure = (
+            SubscriberFailure.objects
+            .select_related("subscriber", "account", "account__stripe_connection")
+            .get(id=failure_id)
+        )
+    except SubscriberFailure.DoesNotExist:
+        logger.error("[send_dunning_email] Failure %s not found", failure_id)
+        return
+
+    subscriber = failure.subscriber
+    account = failure.account
+
+    if not _passes_gates(
+        subscriber, failure, account,
+        email_type=email_type, log_label="send_dunning_email",
+        bypass_engine_active=True,
+    ):
+        return
+
+    # Route by email_type — update_payment + retry_reminder share the
+    # failure-notice template (decline-code-aware CTA copy); final_notice
+    # has its own template per Story 4.3.
+    try:
+        if email_type == "final_notice":
+            msg_id = send_final_notice_email(subscriber, failure, account)
+        else:
+            msg_id = send_notification_email(subscriber, failure, account)
+
+        try:
+            NotificationLog.objects.create(
+                account=account,
+                subscriber=subscriber,
+                failure=failure,
+                email_type=email_type,
+                resend_message_id=msg_id,
+                status="sent",
+            )
+        except IntegrityError:
+            logger.info(
+                "[send_dunning_email] DUPLICATE_RACE failure_id=%s email_type=%s msg_id=%s",
+                failure_id, email_type, msg_id,
+            )
+            _log_suppression(
+                subscriber, failure, account,
+                reason="duplicate_race", email_type=email_type,
+                extra_metadata={"resend_message_id": msg_id},
+            )
+            return
+
+        write_audit_event(
+            subscriber=str(subscriber.id),
+            actor="engine",
+            action="notification_sent",
+            outcome="success",
+            metadata={
+                "email_type": email_type,
+                "decline_code": failure.decline_code,
+                "resend_message_id": msg_id,
+                "trigger": "client_manual",
+            },
+            account=account,
+        )
+        logger.info("[send_dunning_email] COMPLETE failure_id=%s msg_id=%s", failure_id, msg_id)
+
+    except SkipNotification as exc:
+        logger.info(
+            "[send_dunning_email] SKIPPED failure_id=%s reason=%s",
+            failure_id, exc,
+        )
+        _log_suppression(subscriber, failure, account, reason="skip_permanent", email_type=email_type)
+        return
+
+    except EmailConfigurationError as exc:
+        logger.error("[send_dunning_email] CONFIG ERROR failure_id=%s error=%s", failure_id, exc)
+        _record_failure(subscriber, failure, account, exc, email_type=email_type, task_name="send_dunning_email")
+        return
+
+    except Exception as exc:
+        logger.error("[send_dunning_email] FAILED failure_id=%s error=%s", failure_id, exc)
+        if self.request.retries >= self.max_retries:
+            _record_failure(subscriber, failure, account, exc, email_type=email_type, task_name="send_dunning_email")
+            return
         raise self.retry(exc=exc)
 
 

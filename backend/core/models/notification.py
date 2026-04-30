@@ -4,6 +4,8 @@ from core.models.base import TenantScopedModel
 
 EMAIL_TYPE_CHOICES = [
     ("failure_notice", "Failure Notice"),
+    ("update_payment", "Update Payment"),
+    ("retry_reminder", "Retry Reminder"),
     ("final_notice", "Final Notice"),
     ("recovery_confirmation", "Recovery Confirmation"),
 ]
