@@ -17,7 +17,13 @@ const {
   mockExcludeMutate,
   mockToastError,
   mockToastSuccess,
+  mockToastWarning,
   mockSendEmailHookRef,
+  mockBatchSendMutate,
+  mockBatchSendHookRef,
+  mockMarkResolvedFanoutRun,
+  mockExcludeFanoutRun,
+  mockBulkFanoutHookRef,
 } = vi.hoisted(() => {
   const refs = {
     mockUseFailedPayments: vi.fn(),
@@ -30,9 +36,23 @@ const {
     mockExcludeMutate: vi.fn(),
     mockToastError: vi.fn(),
     mockToastSuccess: vi.fn(),
+    mockToastWarning: vi.fn(),
     mockSendEmailHookRef: { current: { mutate: vi.fn(), isPending: false, variables: undefined as unknown } },
+    mockBatchSendMutate: vi.fn(),
+    mockBatchSendHookRef: { current: { mutate: vi.fn(), isPending: false } },
+    mockMarkResolvedFanoutRun: vi.fn(),
+    mockExcludeFanoutRun: vi.fn(),
+    mockBulkFanoutHookRef: {
+      current: {
+        markResolved: { run: vi.fn(), isPending: false, lastResult: null },
+        exclude: { run: vi.fn(), isPending: false, lastResult: null },
+      },
+    },
   };
   refs.mockSendEmailHookRef.current.mutate = refs.mockSendEmailMutate;
+  refs.mockBatchSendHookRef.current.mutate = refs.mockBatchSendMutate;
+  refs.mockBulkFanoutHookRef.current.markResolved.run = refs.mockMarkResolvedFanoutRun;
+  refs.mockBulkFanoutHookRef.current.exclude.run = refs.mockExcludeFanoutRun;
   return refs;
 });
 
@@ -67,7 +87,24 @@ vi.mock("@/hooks/useExcludeSubscriber", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: mockToastError, success: mockToastSuccess, warning: vi.fn() },
+  toast: { error: mockToastError, success: mockToastSuccess, warning: mockToastWarning },
+}));
+
+vi.mock("@/hooks/useBatchSendEmail", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/useBatchSendEmail")>(
+    "@/hooks/useBatchSendEmail",
+  );
+  return {
+    ...actual,
+    useBatchSendEmail: () => mockBatchSendHookRef.current,
+  };
+});
+
+vi.mock("@/hooks/useBulkFanout", () => ({
+  useBulkFanout: (endpoint: string) =>
+    endpoint === "mark-resolved"
+      ? mockBulkFanoutHookRef.current.markResolved
+      : mockBulkFanoutHookRef.current.exclude,
 }));
 
 // Radix DropdownMenu is hard to drive via fireEvent in jsdom (it uses an
@@ -77,15 +114,31 @@ vi.mock("@/components/ui/dropdown-menu", async () => {
   const React = await import("react");
   const Pass = ({ children }: { children: React.ReactNode }) =>
     React.createElement(React.Fragment, null, children);
-  const TriggerPass = ({ children }: { asChild?: boolean; children: React.ReactNode }) =>
-    React.createElement(React.Fragment, null, children);
+  // Trigger: legacy asChild pattern just renders children. Base UI's
+  // `render` prop receives a trigger element — clone it with children
+  // injected so aria-labels stay queryable.
+  const TriggerPass = ({
+    render: renderElement,
+    children,
+  }: {
+    asChild?: boolean;
+    render?: React.ReactElement;
+    children: React.ReactNode;
+  }) => {
+    if (renderElement) {
+      return React.cloneElement(renderElement, undefined, children);
+    }
+    return React.createElement(React.Fragment, null, children);
+  };
   const Item = ({
     children,
     onSelect,
+    onClick,
     disabled,
   }: {
     children: React.ReactNode;
     onSelect?: (e: Event) => void;
+    onClick?: () => void;
     disabled?: boolean;
   }) =>
     React.createElement(
@@ -94,7 +147,9 @@ vi.mock("@/components/ui/dropdown-menu", async () => {
         role: "menuitem",
         "aria-disabled": disabled,
         onClick: () => {
-          if (!disabled) onSelect?.(new Event("select"));
+          if (disabled) return;
+          onClick?.();
+          onSelect?.(new Event("select"));
         },
       },
       children,
@@ -104,6 +159,31 @@ vi.mock("@/components/ui/dropdown-menu", async () => {
     DropdownMenuContent: Pass,
     DropdownMenuTrigger: TriggerPass,
     DropdownMenuItem: Item,
+  };
+});
+
+vi.mock("@/components/ui/dialog", async () => {
+  const React = await import("react");
+  const Pass = ({
+    children,
+    ...rest
+  }: { children?: React.ReactNode } & Record<string, unknown>) =>
+    React.createElement("div", rest as Record<string, unknown>, children);
+  return {
+    Dialog: ({
+      open,
+      children,
+    }: {
+      open?: boolean;
+      onOpenChange?: (next: boolean) => void;
+      children?: React.ReactNode;
+    }) => (open ? React.createElement("div", { role: "dialog" }, children) : null),
+    DialogContent: Pass,
+    DialogDescription: Pass,
+    DialogFooter: Pass,
+    DialogHeader: Pass,
+    DialogTitle: ({ children }: { children?: React.ReactNode }) =>
+      React.createElement("h2", null, children),
   };
 });
 
@@ -171,13 +251,37 @@ describe("FailedPaymentsList", () => {
     mockSendEmailMutate.mockReset();
     mockMarkResolvedMutate.mockReset();
     mockExcludeMutate.mockReset();
+    mockBatchSendMutate.mockReset();
+    mockMarkResolvedFanoutRun.mockReset();
+    mockExcludeFanoutRun.mockReset();
     mockToastError.mockReset();
     mockToastSuccess.mockReset();
+    mockToastWarning.mockReset();
     mockSendEmailHookRef.current = {
       mutate: mockSendEmailMutate,
       isPending: false,
       variables: undefined,
     };
+    mockBatchSendHookRef.current = {
+      mutate: mockBatchSendMutate,
+      isPending: false,
+    };
+    mockBulkFanoutHookRef.current = {
+      markResolved: { run: mockMarkResolvedFanoutRun, isPending: false, lastResult: null },
+      exclude: { run: mockExcludeFanoutRun, isPending: false, lastResult: null },
+    };
+    mockMarkResolvedFanoutRun.mockResolvedValue({
+      succeeded: 0,
+      failed: 0,
+      total: 0,
+      failures: [],
+    });
+    mockExcludeFanoutRun.mockResolvedValue({
+      succeeded: 0,
+      failed: 0,
+      total: 0,
+      failures: [],
+    });
     mockSearchParams.forEach((_, k) => mockSearchParams.delete(k));
     setMidTierWithDpa();
   });
@@ -578,5 +682,198 @@ describe("FailedPaymentsList", () => {
       "Server is on fire",
       { duration: 6000 },
     );
+  });
+
+  // ---------- Story 3.4 v1 — bulk selection + toolbar ----------
+
+  it("renders leading checkbox column for paid Mid-tier with DPA accepted", () => {
+    setMidTierWithDpa();
+    mockUseFailedPayments.mockReturnValue({
+      data: [makeRow({ id: 1 })],
+      isLoading: false,
+    });
+    render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    expect(
+      screen.getByLabelText("Select row for alice@example.com"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Select all visible rows")).toBeInTheDocument();
+  });
+
+  it("selecting a row reveals BulkActionToolbar", () => {
+    setMidTierWithDpa();
+    mockUseFailedPayments.mockReturnValue({
+      data: [makeRow({ id: 1 })],
+      isLoading: false,
+    });
+    render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    expect(screen.queryByRole("toolbar")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Select row for alice@example.com"));
+    expect(screen.getByRole("toolbar")).toBeInTheDocument();
+  });
+
+  it("Free-tier checkboxes are disabled with tier tooltip and toolbar never appears", () => {
+    mockUseAccount.mockReturnValue({
+      data: { id: 1, tier: "free", dpa_accepted: false },
+      isLoading: false,
+    });
+    mockUseDpaGate.mockReturnValue({
+      dpaAccepted: false, loading: false, sendDisabled: true,
+      tooltip: "Sign the DPA to enable email sends", activatePath: "/activate",
+    });
+    mockUseFailedPayments.mockReturnValue({
+      data: [makeRow({ id: 1 })],
+      isLoading: false,
+    });
+    render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    const cb = screen.getByLabelText("Select row for alice@example.com");
+    // Base UI's Checkbox surfaces disabled via aria-disabled (not the HTML attr).
+    expect(cb.getAttribute("aria-disabled")).toBe("true");
+    expect(cb.getAttribute("title")).toBe("Upgrade to Mid or Pro to enable email actions");
+    expect(
+      screen.getByLabelText("Select all visible rows").getAttribute("aria-disabled"),
+    ).toBe("true");
+    fireEvent.click(cb);
+    expect(screen.queryByRole("toolbar")).toBeNull();
+  });
+
+  it("Send recommended dispatches via useBatchSendEmail with filtered selections", () => {
+    setMidTierWithDpa();
+    const r1 = makeRow({ id: 1, subscriber_id: 11, recommended_email_type: "update_payment" });
+    const r2 = makeRow({ id: 2, subscriber_id: 12, recommended_email_type: "update_payment" });
+    const r3 = makeRow({ id: 3, subscriber_id: 13, recommended_email_type: null });
+    mockUseFailedPayments.mockReturnValue({ data: [r1, r2, r3], isLoading: false });
+
+    render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByLabelText("Select all visible rows"));
+    const toolbar = screen.getByRole("toolbar");
+    fireEvent.click(within(toolbar).getByLabelText("Send recommended 3"));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByText("Send all"));
+
+    expect(mockBatchSendMutate).toHaveBeenCalledTimes(1);
+    expect(mockBatchSendMutate.mock.calls[0][0]).toEqual([
+      { subscriber_id: 11, failure_id: 1, email_type: "update_payment" },
+      { subscriber_id: 12, failure_id: 2, email_type: "update_payment" },
+    ]);
+  });
+
+  it("Mark resolved bulk fans out via useBulkFanout(mark-resolved)", async () => {
+    setMidTierWithDpa();
+    const r1 = makeRow({ id: 1, subscriber_id: 11 });
+    const r2 = makeRow({ id: 2, subscriber_id: 12 });
+    mockUseFailedPayments.mockReturnValue({ data: [r1, r2], isLoading: false });
+
+    render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByLabelText("Select all visible rows"));
+    const toolbar = screen.getByRole("toolbar");
+    fireEvent.click(within(toolbar).getByLabelText("Mark resolved 2"));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByText("Mark resolved"));
+
+    expect(mockMarkResolvedFanoutRun).toHaveBeenCalledWith([11, 12]);
+    expect(mockExcludeFanoutRun).not.toHaveBeenCalled();
+  });
+
+  it("Exclude bulk fans out via useBulkFanout(exclude)", () => {
+    setMidTierWithDpa();
+    const r1 = makeRow({ id: 1, subscriber_id: 11 });
+    const r2 = makeRow({ id: 2, subscriber_id: 12 });
+    mockUseFailedPayments.mockReturnValue({ data: [r1, r2], isLoading: false });
+
+    render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByLabelText("Select all visible rows"));
+    const toolbar = screen.getByRole("toolbar");
+    fireEvent.click(within(toolbar).getByLabelText("Exclude 2"));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByText("Exclude all"));
+
+    expect(mockExcludeFanoutRun).toHaveBeenCalledWith([11, 12]);
+    expect(mockMarkResolvedFanoutRun).not.toHaveBeenCalled();
+  });
+
+  it("Successful batch surfaces toast.success and clears selection", () => {
+    setMidTierWithDpa();
+    const r1 = makeRow({ id: 1, subscriber_id: 11, recommended_email_type: "update_payment" });
+    mockUseFailedPayments.mockReturnValue({ data: [r1], isLoading: false });
+
+    mockBatchSendMutate.mockImplementation((_vars, opts) => {
+      opts?.onSuccess?.({ queued: 1, failed: 0, failures: [], selections_total: 1 });
+    });
+
+    render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByLabelText("Select row for alice@example.com"));
+    const toolbar = screen.getByRole("toolbar");
+    fireEvent.click(within(toolbar).getByLabelText("Send recommended 1"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByText("Send all"));
+
+    expect(mockToastSuccess).toHaveBeenCalledWith("Queued 1 dunning email.");
+    // Selection cleared → toolbar gone.
+    expect(screen.queryByRole("toolbar")).toBeNull();
+  });
+
+  it("Partial batch failure surfaces toast.warning with count breakdown", () => {
+    setMidTierWithDpa();
+    const r1 = makeRow({ id: 1, subscriber_id: 11, recommended_email_type: "update_payment" });
+    const r2 = makeRow({ id: 2, subscriber_id: 12, recommended_email_type: "update_payment" });
+    mockUseFailedPayments.mockReturnValue({ data: [r1, r2], isLoading: false });
+
+    mockBatchSendMutate.mockImplementation((_vars, opts) => {
+      opts?.onSuccess?.({
+        queued: 1, failed: 1, selections_total: 2,
+        failures: [{ subscriber_id: 12, failure_id: 2, code: "OPT_OUT", message: "x" }],
+      });
+    });
+
+    render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByLabelText("Select all visible rows"));
+    fireEvent.click(within(screen.getByRole("toolbar")).getByLabelText("Send recommended 2"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByText("Send all"));
+
+    expect(mockToastWarning).toHaveBeenCalledWith(
+      "Queued 1 of 2. 1 failed.",
+      { duration: 8000 },
+    );
+  });
+
+  it("429 batch error surfaces toast.error with retry-after seconds", () => {
+    setMidTierWithDpa();
+    const r1 = makeRow({ id: 1, subscriber_id: 11, recommended_email_type: "update_payment" });
+    mockUseFailedPayments.mockReturnValue({ data: [r1], isLoading: false });
+
+    mockBatchSendMutate.mockImplementation((_vars, opts) => {
+      opts?.onError?.({ code: "RATE_LIMITED", retryAfterSeconds: 42, message: "x" });
+    });
+
+    render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByLabelText("Select row for alice@example.com"));
+    fireEvent.click(within(screen.getByRole("toolbar")).getByLabelText("Send recommended 1"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByText("Send all"));
+
+    expect(mockToastError).toHaveBeenCalledWith(
+      "Rate limit reached on bulk send. Try again in 42s.",
+      { duration: 6000 },
+    );
+  });
+
+  it("sort change clears stale selectedIds (toolbar disappears when refetch drops the row)", () => {
+    setMidTierWithDpa();
+    const initial = [
+      makeRow({ id: 1, subscriber_id: 11 }),
+      makeRow({ id: 2, subscriber_id: 12 }),
+    ];
+    mockUseFailedPayments.mockReturnValue({ data: initial, isLoading: false });
+
+    const { rerender } = render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByLabelText("Select all visible rows"));
+    expect(screen.getByRole("toolbar")).toBeInTheDocument();
+
+    // Sort/refetch returns a different row set — the previously-selected ids
+    // (1, 2) are no longer in `data`. selectedIds should prune; toolbar hides.
+    mockUseFailedPayments.mockReturnValue({
+      data: [makeRow({ id: 99, subscriber_id: 99 })],
+      isLoading: false,
+    });
+    rerender(<FailedPaymentsList />);
+    expect(screen.queryByRole("toolbar")).toBeNull();
   });
 });

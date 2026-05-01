@@ -4,6 +4,7 @@ from core.views.health import health_check
 from core.views.account import account_detail, complete_profile, accept_dpa, set_engine_mode, set_notification_tone, notification_preview
 from core.views.actions import pending_action_list, batch_approve_actions, exclude_subscriber
 from core.views.send_email import send_email, mark_resolved
+from core.views.batch_send_email import batch_send_email
 from core.views.dashboard import dashboard_summary, failed_payments_list
 from core.views.stripe import initiate_stripe_connect, stripe_connect_callback
 from core.views.subscribers import subscriber_list
@@ -22,6 +23,7 @@ urlpatterns = [
     path("v1/actions/pending/", pending_action_list, name="pending_action_list"),
     path("v1/actions/batch/", batch_approve_actions, name="batch_approve_actions"),
     path("v1/subscribers/", subscriber_list, name="subscriber_list"),
+    path("v1/subscribers/batch-send-email/", batch_send_email, name="batch_send_email"),
     path("v1/subscribers/<int:subscriber_id>/exclude/", exclude_subscriber, name="exclude_subscriber"),
     path("v1/subscribers/<int:subscriber_id>/send-email/", send_email, name="subscriber_send_email"),
     path("v1/subscribers/<int:subscriber_id>/mark-resolved/", mark_resolved, name="subscriber_mark_resolved"),

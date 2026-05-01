@@ -520,6 +520,104 @@ class TestSendRecoveryConfirmation:
         send_recovery_confirmation(999999)
         mock_send.assert_not_called()
 
+    # ----- Story 3.4 v1 — bypass_engine_active kwarg -----
+
+    @patch("core.tasks.notifications.send_recovery_confirmation_email")
+    def test_bypass_engine_active_skips_gate_1(self, mock_send, failure):
+        """Story 3.4 v1: polling-driven recovery dispatches with bypass=True."""
+        mock_send.return_value = "msg_polling_rec"
+        # Force engine_not_active (v1 default: engine_mode=None).
+        failure.account.engine_mode = None
+        failure.account.save(update_fields=["engine_mode"])
+
+        send_recovery_confirmation(failure.id, bypass_engine_active=True)
+
+        mock_send.assert_called_once()
+        log = NotificationLog.objects.get(status="sent", email_type="recovery_confirmation")
+        assert log.resend_message_id == "msg_polling_rec"
+        audit = AuditLog.objects.filter(action="notification_sent").first()
+        assert audit is not None
+        assert audit.metadata["trigger"] == "polling_recovery"
+
+    @patch("core.tasks.notifications.send_recovery_confirmation_email")
+    def test_default_call_preserves_v0_gate_behavior(self, mock_send, failure):
+        """v0 caller passes positional only — engine gate still enforced."""
+        failure.account.engine_mode = None
+        failure.account.save(update_fields=["engine_mode"])
+
+        send_recovery_confirmation(failure.id)
+
+        mock_send.assert_not_called()
+        log = NotificationLog.objects.get(status="suppressed", email_type="recovery_confirmation")
+        assert log.metadata["reason"] == "engine_not_active"
+
+    @patch("core.tasks.notifications.send_recovery_confirmation_email")
+    def test_bypass_does_not_skip_other_gates(self, mock_send, failure):
+        """bypass=True skips Gate 1 only — Gates 2-6 still run."""
+        sub = failure.subscriber
+        sub.email = ""
+        sub.save(update_fields=["email"])
+
+        send_recovery_confirmation(failure.id, bypass_engine_active=True)
+
+        mock_send.assert_not_called()
+        log = NotificationLog.objects.get(status="suppressed", email_type="recovery_confirmation")
+        assert log.metadata["reason"] == "no_email"
+
+    @patch("core.tasks.notifications.send_recovery_confirmation_email")
+    def test_bypass_does_not_skip_excluded_gate(self, mock_send, failure):
+        """bypass=True still enforces Gate 3 (excluded_from_automation)."""
+        failure.account.engine_mode = None
+        failure.account.save(update_fields=["engine_mode"])
+        sub = failure.subscriber
+        sub.excluded_from_automation = True
+        sub.save(update_fields=["excluded_from_automation"])
+
+        send_recovery_confirmation(failure.id, bypass_engine_active=True)
+
+        mock_send.assert_not_called()
+        log = NotificationLog.objects.get(status="suppressed", email_type="recovery_confirmation")
+        assert log.metadata["reason"] == "excluded_from_automation"
+
+    @patch("core.tasks.notifications.send_recovery_confirmation_email")
+    def test_bypass_does_not_skip_optout_gate(self, mock_send, failure):
+        """bypass=True still enforces Gate 4 (NotificationOptOut)."""
+        failure.account.engine_mode = None
+        failure.account.save(update_fields=["engine_mode"])
+        NotificationOptOut.objects.create(
+            account=failure.account,
+            subscriber_email=failure.subscriber.email,
+        )
+
+        send_recovery_confirmation(failure.id, bypass_engine_active=True)
+
+        mock_send.assert_not_called()
+        log = NotificationLog.objects.get(status="suppressed", email_type="recovery_confirmation")
+        assert log.metadata["reason"] == "opt_out"
+
+    @patch("core.tasks.notifications.send_recovery_confirmation_email")
+    def test_bypass_does_not_skip_duplicate_gate(self, mock_send, failure):
+        """bypass=True still enforces Gate 5 (duplicate NotificationLog at status=sent)."""
+        failure.account.engine_mode = None
+        failure.account.save(update_fields=["engine_mode"])
+        NotificationLog.objects.create(
+            account=failure.account,
+            subscriber=failure.subscriber,
+            failure=failure,
+            email_type="recovery_confirmation",
+            status="sent",
+            resend_message_id="msg_existing",
+        )
+
+        send_recovery_confirmation(failure.id, bypass_engine_active=True)
+
+        mock_send.assert_not_called()
+        # Two NotificationLog rows now: pre-existing "sent", plus the new "suppressed".
+        suppressed = NotificationLog.objects.get(
+            status="suppressed", email_type="recovery_confirmation",
+        )
+        assert suppressed.metadata["reason"] == "duplicate"
+
 
 # ---------------------------------------------------------------------------
 # Story 4.4 — opt-out gate suppression: tenant scoping + canonicalization

@@ -287,10 +287,14 @@ def send_final_notice(self, failure_id: int):
 
 
 @app.task(bind=True, max_retries=3, default_retry_delay=60)
-def send_recovery_confirmation(self, failure_id: int):
-    """Send a recovery confirmation email — short acknowledgement after a successful retry (FR25).
+def send_recovery_confirmation(self, failure_id: int, bypass_engine_active: bool = False):
+    """Send a recovery confirmation email — short acknowledgement after a successful retry (FR25)
+    or polling-detected payment recovery (Story 3.4 v1).
 
-    No CTA, no customer_update_url requirement; the recovery has already happened.
+    The bypass_engine_active kwarg is opt-in (default False preserves the
+    v0 retry-success caller in services/recovery.py:281-289). Story 3.4 v1's
+    polling caller passes True so v1 accounts (engine_mode=None) still emit
+    the recovery email; Gates 2-6 still run.
     """
     logger.info("[send_recovery_confirmation] START failure_id=%s", failure_id)
 
@@ -311,6 +315,7 @@ def send_recovery_confirmation(self, failure_id: int):
     if not _passes_gates(
         subscriber, failure, account,
         email_type=email_type, log_label="send_recovery_confirmation",
+        bypass_engine_active=bypass_engine_active,
     ):
         return
 
@@ -347,6 +352,7 @@ def send_recovery_confirmation(self, failure_id: int):
                 "email_type": email_type,
                 "decline_code": failure.decline_code,
                 "resend_message_id": msg_id,
+                **({"trigger": "polling_recovery"} if bypass_engine_active else {}),
             },
             account=account,
         )

@@ -7,6 +7,7 @@ _THROTTLED_MESSAGES = {
     "password_reset": "Too many password reset requests. Try again later.",
     "send_email": "Too many email send requests. Try again later.",
     "mark_resolved": "Too many resolve actions. Try again later.",
+    "batch_send_email": "Too many batch send requests. Try again later.",
 }
 _THROTTLED_DEFAULT_MESSAGE = "Too many requests. Try again later."
 
