@@ -219,6 +219,7 @@ function makeRow(overrides: Partial<FailedPayment> = {}): FailedPayment {
     last_email_sent_at: null,
     payment_method_country: "FR",
     excluded_from_automation: false,
+    geo_warning: false,
     ...overrides,
   };
 }
@@ -355,6 +356,24 @@ describe("FailedPaymentsList", () => {
     });
     render(<FailedPaymentsList />, { wrapper: createWrapper() });
     expect(screen.getAllByText("Update payment").length).toBeGreaterThan(0);
+  });
+
+  it("renders the EU/UK chip when geo_warning=true", () => {
+    mockUseFailedPayments.mockReturnValue({
+      data: [makeRow({ geo_warning: true })],
+      isLoading: false,
+    });
+    render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    expect(screen.getByText("EU/UK")).toBeInTheDocument();
+  });
+
+  it("does not render the EU/UK chip when geo_warning=false", () => {
+    mockUseFailedPayments.mockReturnValue({
+      data: [makeRow({ geo_warning: false })],
+      isLoading: false,
+    });
+    render(<FailedPaymentsList />, { wrapper: createWrapper() });
+    expect(screen.queryByText("EU/UK")).not.toBeInTheDocument();
   });
 
   it("last email shows em-dash when null", () => {

@@ -94,6 +94,7 @@ function makeRow(overrides: Partial<FailedPayment> = {}): FailedPayment {
     last_email_sent_at: null,
     payment_method_country: "FR",
     excluded_from_automation: false,
+    geo_warning: false,
     ...overrides,
   };
 }

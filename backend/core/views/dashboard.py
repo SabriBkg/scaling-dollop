@@ -5,8 +5,9 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.engine.compliance import EU_COUNTRY_CODES
 from core.engine.labels import DECLINE_CODE_LABELS
-from core.engine.rules import DECLINE_RULES
+from core.engine.rules import DECLINE_RULES, get_recommended_email
 from core.engine.state_machine import STATUS_ACTIVE, STATUS_RECOVERED, STATUS_FRAUD_FLAGGED
 from core.models.notification import NotificationLog
 from core.models.pending_action import PendingAction, STATUS_PENDING
@@ -264,6 +265,14 @@ def failed_payments_list(request):
     results = []
     for f in failures:
         sub = f.subscriber
+        days = (now - f.failure_created_at).days
+        rec = get_recommended_email(f.decline_code, days)
+        rec_for_wire = rec if rec in {"update_payment", "retry_reminder", "final_notice"} else None
+        if sub.excluded_from_automation:
+            rec_for_wire = None
+        pm_country = (f.payment_method_country or "").upper().strip()
+        geo_warning = pm_country in EU_COUNTRY_CODES
+
         results.append({
             "id": f.id,
             "subscriber_id": sub.id,
@@ -276,10 +285,10 @@ def failed_payments_list(request):
             ),
             "amount_cents": f.amount_cents,
             "failure_created_at": f.failure_created_at,
-            # recommended_email_type set to None until Story 3.5 v1 lands the rule engine.
-            "recommended_email_type": None,
+            "recommended_email_type": rec_for_wire,
             "last_email_sent_at": f.last_email_sent_at,
             "payment_method_country": f.payment_method_country,
+            "geo_warning": geo_warning,
             "excluded_from_automation": sub.excluded_from_automation,
         })
 

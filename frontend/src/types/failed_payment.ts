@@ -18,6 +18,7 @@ export interface FailedPayment {
   last_email_sent_at: string | null;
   payment_method_country: string | null;
   excluded_from_automation: boolean;
+  geo_warning: boolean;
 }
 
 export type SortKey = "date" | "amount";

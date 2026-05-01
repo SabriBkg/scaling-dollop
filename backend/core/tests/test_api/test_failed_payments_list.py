@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
+from unittest.mock import patch
 
 import pytest
 from django.utils import timezone
@@ -181,10 +182,111 @@ class TestFailedPaymentsListEndpoint:
         data = auth_client.get(self.URL).json()["data"]
         assert data[0]["decline_reason"] == "Payment declined"
 
-    def test_recommended_email_type_is_null_in_v1(self, auth_client, account):
+    def test_recommended_email_type_update_payment_for_recent_failure(
+        self, auth_client, account
+    ):
+        # Failure created at "now" → 0 days old → update_payment.
         _create_subscriber(account, "insufficient_funds", 5000)
         data = auth_client.get(self.URL).json()["data"]
+        assert data[0]["recommended_email_type"] == "update_payment"
+
+    def test_recommended_email_type_retry_reminder_after_7_days(
+        self, auth_client, account
+    ):
+        # Mock view-level "now" to a mid-month date so the 8-day-old failure
+        # still falls within the current month filter.
+        fixed_now = datetime(2026, 5, 25, 12, 0, tzinfo=dt_timezone.utc)
+        month_start = fixed_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        _create_subscriber(
+            account,
+            "insufficient_funds",
+            5000,
+            failure_created_at=fixed_now - timedelta(days=8),
+        )
+        # Anchor a row before month_start to confirm the filter still excludes it.
+        _create_subscriber(
+            account,
+            "insufficient_funds",
+            6000,
+            pi_suffix="_old",
+            failure_created_at=month_start - timedelta(seconds=1),
+        )
+        with patch("core.views.dashboard.timezone.now", return_value=fixed_now):
+            data = auth_client.get(self.URL).json()["data"]
+        assert len(data) == 1
+        assert data[0]["recommended_email_type"] == "retry_reminder"
+
+    def test_recommended_email_type_final_notice_after_14_days(
+        self, auth_client, account
+    ):
+        fixed_now = datetime(2026, 5, 25, 12, 0, tzinfo=dt_timezone.utc)
+        _create_subscriber(
+            account,
+            "insufficient_funds",
+            5000,
+            failure_created_at=fixed_now - timedelta(days=20),
+        )
+        with patch("core.views.dashboard.timezone.now", return_value=fixed_now):
+            data = auth_client.get(self.URL).json()["data"]
+        assert data[0]["recommended_email_type"] == "final_notice"
+
+    def test_recommended_email_type_null_for_fraud_flagged_decline_code(
+        self, auth_client, account
+    ):
+        _create_subscriber(account, "fraudulent", 4000)
+        data = auth_client.get(self.URL).json()["data"]
         assert data[0]["recommended_email_type"] is None
+
+    def test_recommended_email_type_null_for_excluded_subscriber(
+        self, auth_client, account
+    ):
+        sub, _ = _create_subscriber(account, "insufficient_funds", 5000)
+        sub.excluded_from_automation = True
+        sub.save(update_fields=["excluded_from_automation"])
+        data = auth_client.get(self.URL).json()["data"]
+        assert data[0]["recommended_email_type"] is None
+
+    def test_geo_warning_true_for_eu_country(self, auth_client, account):
+        sub, failure = _create_subscriber(
+            account, "insufficient_funds", 5000, pi_suffix="_eu"
+        )
+        failure.payment_method_country = "DE"
+        failure.save(update_fields=["payment_method_country"])
+        data = auth_client.get(self.URL).json()["data"]
+        assert data[0]["geo_warning"] is True
+
+    def test_geo_warning_true_for_uk(self, auth_client, account):
+        sub, failure = _create_subscriber(
+            account, "insufficient_funds", 5000, pi_suffix="_uk"
+        )
+        failure.payment_method_country = "GB"
+        failure.save(update_fields=["payment_method_country"])
+        data = auth_client.get(self.URL).json()["data"]
+        assert data[0]["geo_warning"] is True
+
+    def test_geo_warning_false_for_us(self, auth_client, account):
+        sub, failure = _create_subscriber(
+            account, "insufficient_funds", 5000, pi_suffix="_us"
+        )
+        failure.payment_method_country = "US"
+        failure.save(update_fields=["payment_method_country"])
+        data = auth_client.get(self.URL).json()["data"]
+        assert data[0]["geo_warning"] is False
+
+    def test_geo_warning_false_when_country_null(self, auth_client, account):
+        # Default _create_subscriber leaves payment_method_country null/blank.
+        _create_subscriber(account, "insufficient_funds", 5000)
+        data = auth_client.get(self.URL).json()["data"]
+        assert data[0]["geo_warning"] is False
+
+    def test_geo_warning_normalises_lowercase_country(self, auth_client, account):
+        sub, failure = _create_subscriber(
+            account, "insufficient_funds", 5000, pi_suffix="_lower"
+        )
+        failure.payment_method_country = "de"
+        failure.save(update_fields=["payment_method_country"])
+        data = auth_client.get(self.URL).json()["data"]
+        assert data[0]["geo_warning"] is True
 
     def test_last_email_sent_at_null_when_no_notification(self, auth_client, account):
         _create_subscriber(account, "insufficient_funds", 5000)
@@ -257,6 +359,7 @@ class TestFailedPaymentsListEndpoint:
             "recommended_email_type",
             "last_email_sent_at",
             "payment_method_country",
+            "geo_warning",
             "excluded_from_automation",
         ):
             assert key in row, f"missing key: {key}"

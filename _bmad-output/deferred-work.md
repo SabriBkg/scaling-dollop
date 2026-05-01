@@ -263,3 +263,11 @@
 - **`_check_payment_recoveries` walks every Active subscriber even with zero failures** — `backend/core/tasks/polling.py:441-454`. No `EXISTS` pre-filter on `SubscriberFailure`. _Reason: v2 perf optimization; v1 subscriber count bounded._
 - **`request.user.__class__.account.RelatedObjectDoesNotExist` fragile traversal** — `backend/core/views/batch_send_email.py:49-55`. Explicit `Account.DoesNotExist` would be cleaner. Mirrors per-row `send_email` pattern. _Reason: matches existing convention._
 - **`test_no_account_returns_404` removed per Dev Agent Record** — `backend/core/views/batch_send_email.py:49-55`. The 404 branch in the view is now untested. _Reason: defensive corner case beyond AC #1–#11; per-row `send_email` has no equivalent test either._
+
+## Deferred from: code review of story-3-5-v1-recommended-email-mapping (2026-05-01)
+
+- **Current-month filter hides escalated `final_notice` rows from prior month** — `backend/core/views/dashboard.py:252` (`failure_created_at__gte=month_start`). Pre-existing from Story 3.2 v1; surfaces now because day-bucket escalation makes the gap visible. A failure from the 28th of the prior month escalates to `final_notice` at age 14d but disappears from the dashboard on month rollover. Product question (rolling 30d window vs strict current-month).
+- **Day-bucket math via `timedelta.days` floors sub-day ages** — `backend/core/views/dashboard.py:268`. A 6d 23h failure reads as `days=6` (`update_payment`) until it crosses 7d 0h. Spec defines buckets in whole days; revisit if product wants hour-precision escalation in v2.
+- **Theoretical timezone-naive `failure_created_at` would crash subtraction** — `backend/core/views/dashboard.py:268`. Relies on `USE_TZ=True` (Django default) and the model's UTC-aware writes. No code path stores naive datetimes today; defensive guard not added.
+- **Per-account timezone vs UTC month boundary** — `backend/core/views/dashboard.py:237`. Story 3.2 v1 already deferred per-account TZ to v2.
+- **No pagination on `failed_payments_list`** — Pre-existing; tracked separately when first paid customer hits the subscriber cap.

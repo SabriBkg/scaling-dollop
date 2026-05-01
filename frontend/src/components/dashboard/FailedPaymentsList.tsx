@@ -356,7 +356,17 @@ function PaymentRow({
       </TableCell>
       <TableCell>{formatDate(row.failure_created_at)}</TableCell>
       <TableCell>
-        <RecommendedEmailChip type={row.recommended_email_type} />
+        <div className="inline-flex items-center gap-1.5">
+          <RecommendedEmailChip type={row.recommended_email_type} />
+          {row.geo_warning && (
+            <span
+              className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700"
+              title="EU/UK payment context — informational only"
+            >
+              EU/UK
+            </span>
+          )}
+        </div>
       </TableCell>
       <TableCell>
         <StatusBadge status={row.subscriber_status} />

@@ -42,4 +42,5 @@ class FailedPaymentRowSerializer(serializers.Serializer):
     recommended_email_type = serializers.CharField(allow_null=True)
     last_email_sent_at = serializers.DateTimeField(allow_null=True)
     payment_method_country = serializers.CharField(allow_null=True, allow_blank=True)
+    geo_warning = serializers.BooleanField()
     excluded_from_automation = serializers.BooleanField()
