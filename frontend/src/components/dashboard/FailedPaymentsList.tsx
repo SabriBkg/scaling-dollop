@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,12 +23,23 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { StatusBadge } from "@/components/subscriber/StatusBadge";
+import { BulkActionToolbar } from "@/components/dashboard/BulkActionToolbar";
 import { useAccount } from "@/hooks/useAccount";
+import {
+  useBatchSendEmail,
+  type BatchSelection,
+  type BatchSendResult,
+} from "@/hooks/useBatchSendEmail";
+import { useBulkFanout } from "@/hooks/useBulkFanout";
 import { useDpaGate } from "@/hooks/useDpaGate";
 import { useExcludeSubscriber } from "@/hooks/useExcludeSubscriber";
 import { useFailedPayments } from "@/hooks/useFailedPayments";
 import { useMarkResolved } from "@/hooks/useMarkResolved";
-import { useSendEmail, type SendableEmailType } from "@/hooks/useSendEmail";
+import {
+  useSendEmail,
+  SendEmailError,
+  type SendableEmailType,
+} from "@/hooks/useSendEmail";
 import { cn } from "@/lib/utils";
 import {
   formatCurrency,
@@ -297,10 +310,16 @@ function PaymentRow({
   row,
   gateDisabled,
   gateTooltip,
+  isSelected,
+  isFree,
+  onToggleSelected,
 }: {
   row: FailedPayment;
   gateDisabled: boolean;
   gateTooltip: string | undefined;
+  isSelected: boolean;
+  isFree: boolean;
+  onToggleSelected: (rowId: number, checked: boolean) => void;
 }) {
   const isFraud = row.subscriber_status === "fraud_flagged";
   const subscriberLabel = row.subscriber_email || row.subscriber_stripe_customer_id;
@@ -310,6 +329,15 @@ function PaymentRow({
       data-fraud={isFraud ? "true" : "false"}
       className={cn(isFraud && "border-amber-500 border-2")}
     >
+      <TableCell className="w-8">
+        <Checkbox
+          checked={isSelected}
+          disabled={isFree}
+          aria-label={`Select row for ${subscriberLabel}`}
+          title={isFree ? TIER_TOOLTIP : undefined}
+          onCheckedChange={(checked) => onToggleSelected(row.id, Boolean(checked))}
+        />
+      </TableCell>
       <TableCell>
         <div className="flex flex-col">
           <span className="font-medium text-[var(--text-primary)]">
@@ -354,8 +382,6 @@ export function FailedPaymentsList() {
   const { data: account } = useAccount();
   const isFree = account?.tier === "free";
 
-  // Tooltip precedence: tier > DPA. Story 3.3 v1 wires real mutations;
-  // each per-row mutation hook surfaces its own pending state and toast.
   let gateTooltip: string | undefined = undefined;
   if (isFree) {
     gateTooltip = TIER_TOOLTIP;
@@ -363,6 +389,133 @@ export function FailedPaymentsList() {
     gateTooltip = dpaTooltip;
   }
   const gateDisabled = isFree || sendDisabled;
+
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const batchSendEmail = useBatchSendEmail();
+  const markResolvedFanout = useBulkFanout("mark-resolved");
+  const excludeFanout = useBulkFanout("exclude");
+
+  // Prune stale ids when `data` identity changes (sort/refetch returning a
+  // different row set). Without this, selectedIds accumulates ghost ids and
+  // the header indeterminate state can drift.
+  useEffect(() => {
+    if (!data) return;
+    setSelectedIds((prev) => {
+      const dataIds = new Set(data.map((r) => r.id));
+      let changed = false;
+      const next = new Set<number>();
+      for (const id of prev) {
+        if (dataIds.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [data]);
+
+  const effectiveSelectedIds = isFree ? new Set<number>() : selectedIds;
+  const selectedRows = (data ?? []).filter((r) => effectiveSelectedIds.has(r.id));
+
+  const isAnyBulkPending =
+    batchSendEmail.isPending || markResolvedFanout.isPending || excludeFanout.isPending;
+
+  const toggleId = (rowId: number, checked: boolean) => {
+    if (isFree) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(rowId);
+      else next.delete(rowId);
+      return next;
+    });
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (isFree || !data) return;
+    setSelectedIds(checked ? new Set(data.map((r) => r.id)) : new Set());
+  };
+
+  const handleBatchResult = (res: BatchSendResult) => {
+    if (res.failed === 0) {
+      toast.success(`Queued ${res.queued} dunning email${res.queued !== 1 ? "s" : ""}.`);
+    } else if (res.queued > 0) {
+      toast.warning(
+        `Queued ${res.queued} of ${res.selections_total}. ${res.failed} failed.`,
+        { duration: 8000 },
+      );
+    } else {
+      toast.error("Could not queue any emails.", { duration: 6000 });
+    }
+    setSelectedIds(new Set());
+  };
+
+  const handleBatchError = (err: SendEmailError) => {
+    if (err.code === "RATE_LIMITED") {
+      const seconds = err.retryAfterSeconds ?? 60;
+      toast.error(`Rate limit reached on bulk send. Try again in ${seconds}s.`, {
+        duration: 6000,
+      });
+    } else if (err.code === "OPT_OUT") {
+      toast.error("Subscriber has opted out of notifications.", { duration: 6000 });
+    } else if (err.code === "EXCLUDED") {
+      toast.error("Subscriber is excluded from automation.", { duration: 6000 });
+    } else if (err.code === "DPA_REQUIRED") {
+      toast.error("Sign the DPA to enable email sends.", { duration: Infinity });
+    } else {
+      toast.error(err.message || "Failed to queue emails.", { duration: 6000 });
+    }
+  };
+
+  const handleFanoutResult = (verb: "Marked" | "Excluded") =>
+    (res: { succeeded: number; failed: number; total: number }) => {
+      if (res.failed === 0) {
+        toast.success(`${verb} ${res.succeeded}.`);
+      } else if (res.succeeded > 0) {
+        toast.warning(
+          `${verb} ${res.succeeded} of ${res.total} — ${res.failed} failed.`,
+          { duration: 8000 },
+        );
+      } else {
+        toast.error(`Failed to ${verb.toLowerCase()} ${res.total}.`, {
+          duration: 6000,
+        });
+      }
+      setSelectedIds(new Set());
+    };
+
+  const onSendBulk = (selections: BatchSelection[]) => {
+    batchSendEmail.mutate(selections, {
+      onSuccess: handleBatchResult,
+      onError: handleBatchError,
+    });
+  };
+
+  const onMarkResolvedBulk = (rows: FailedPayment[]) => {
+    const uniqueSubscriberIds = Array.from(
+      new Set(rows.map((r) => r.subscriber_id)),
+    );
+    markResolvedFanout
+      .run(uniqueSubscriberIds)
+      .then(handleFanoutResult("Marked"));
+  };
+
+  const onExcludeBulk = (rows: FailedPayment[]) => {
+    const uniqueSubscriberIds = Array.from(
+      new Set(rows.map((r) => r.subscriber_id)),
+    );
+    excludeFanout
+      .run(uniqueSubscriberIds)
+      .then(handleFanoutResult("Excluded"));
+  };
+
+  const allRendered = data?.length ?? 0;
+  const headerChecked =
+    allRendered > 0 && selectedRows.length === allRendered;
+  const headerIndeterminate =
+    selectedRows.length > 0 && selectedRows.length < allRendered;
+
+  let pendingLabel: string | undefined;
+  if (batchSendEmail.isPending) pendingLabel = "Sending…";
+  else if (markResolvedFanout.isPending) pendingLabel = "Marking resolved…";
+  else if (excludeFanout.isPending) pendingLabel = "Excluding…";
 
   return (
     <section>
@@ -399,6 +552,16 @@ export function FailedPaymentsList() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8">
+                <Checkbox
+                  checked={headerChecked}
+                  indeterminate={headerIndeterminate}
+                  disabled={isFree}
+                  aria-label="Select all visible rows"
+                  title={isFree ? TIER_TOOLTIP : undefined}
+                  onCheckedChange={(checked) => handleSelectAll(Boolean(checked))}
+                />
+              </TableHead>
               <TableHead>Subscriber</TableHead>
               <TableHead>Reason</TableHead>
               <TableHead className="text-right">
@@ -431,11 +594,25 @@ export function FailedPaymentsList() {
                 row={row}
                 gateDisabled={gateDisabled}
                 gateTooltip={gateTooltip}
+                isSelected={effectiveSelectedIds.has(row.id)}
+                isFree={!!isFree}
+                onToggleSelected={toggleId}
               />
             ))}
           </TableBody>
         </Table>
       )}
+
+      <BulkActionToolbar
+        selectedRows={selectedRows}
+        isPending={isAnyBulkPending}
+        pendingLabel={pendingLabel}
+        onSendRecommended={(selections) => onSendBulk(selections)}
+        onSendSpecific={(selections) => onSendBulk(selections)}
+        onMarkResolved={onMarkResolvedBulk}
+        onExclude={onExcludeBulk}
+        onDeselectAll={() => setSelectedIds(new Set())}
+      />
     </section>
   );
 }

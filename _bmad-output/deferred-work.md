@@ -254,3 +254,12 @@
 - **DPA-error toast uses `duration: Infinity`** — `FailedPaymentsList.tsx:207`. Multiple clicks stack non-dismissable toasts; no toast id for dedupe. _Reason: low-frequency case (DPA gates the row up-front), minor polish._
 - **`bypass_engine_active=True` future-misuse risk** — only one caller today; flagged if anyone else calls `send_dunning_email.delay()` directly. _Reason: YAGNI for now; revisit when v2 adds new callers._
 - **Subscriber with empty email returns 202 then task-suppresses silently** — `send_email.py`. View doesn't validate `subscriber.email` is non-empty; task Gate 2 catches it but UI shows "Queued". _Reason: data-quality issue, not spec violation; spec is silent on this case._
+
+## Deferred from: code review of 3-4-v1-bulk-send-and-status-polling (2026-04-30)
+
+- **No `_audit_blocked` row written for batch `NOT_FOUND` lookups** — `backend/core/views/batch_send_email.py:159-180`. Tenant-probe enumeration via 5/min × 100 selections has no per-row audit signal. Same pattern as per-row `send_email`. _Reason: matches existing convention; pre-existing posture._
+- **`useBulkFanout` issues unbounded parallel POSTs** — `frontend/src/hooks/useBulkFanout.ts:26-46`. No client-side cap or chunking; a 60+ row fan-out could exhaust the 60/min `mark_resolved` throttle mid-flight. _Reason: v2 scaling concern; v1 dashboard is current-month bounded._
+- **`_check_payment_recoveries` silently skips on Stripe `RateLimitError`** — `backend/core/tasks/polling.py:457-466`. Caught as generic `StripeError`; should retry distinctly. Same pattern as `_check_subscription_cancellations`. _Reason: matches existing helper's posture; revisit alongside polling-resilience hardening._
+- **`_check_payment_recoveries` walks every Active subscriber even with zero failures** — `backend/core/tasks/polling.py:441-454`. No `EXISTS` pre-filter on `SubscriberFailure`. _Reason: v2 perf optimization; v1 subscriber count bounded._
+- **`request.user.__class__.account.RelatedObjectDoesNotExist` fragile traversal** — `backend/core/views/batch_send_email.py:49-55`. Explicit `Account.DoesNotExist` would be cleaner. Mirrors per-row `send_email` pattern. _Reason: matches existing convention._
+- **`test_no_account_returns_404` removed per Dev Agent Record** — `backend/core/views/batch_send_email.py:49-55`. The 404 branch in the view is now untested. _Reason: defensive corner case beyond AC #1–#11; per-row `send_email` has no equivalent test either._

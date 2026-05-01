@@ -153,9 +153,14 @@ def poll_account_failures(self, account_id):
     if is_engine_active(account):
         _detect_card_updates(account, access_token)
 
-    # Check for subscription cancellations (AC7)
-    if is_engine_active(account):
-        _check_subscription_cancellations(account, access_token)
+    # Story 3.4 v1: ungate from is_engine_active so v1 accounts (engine_mode=None)
+    # get cancellation-driven Active → Passive Churn transitions every cycle.
+    # Free-tier accounts still gate at the top of poll_account_failures via
+    # get_polling_frequency(account).
+    _check_subscription_cancellations(account, access_token)
+
+    # Story 3.4 v1: payment-recovery detection (Active → Recovered).
+    _check_payment_recoveries(account, access_token)
 
     # Mark successful poll time
     cache.set(cache_key, timezone.now(), timeout=POLL_CACHE_TTL)
@@ -408,6 +413,105 @@ def _check_subscription_cancellations(account, access_token):
                 "Failed to check subscriptions for subscriber %s: %s",
                 subscriber.id, str(exc),
             )
+
+
+# Cap the lookback window to bound Stripe API calls. v1 dashboard only shows
+# current-month failures (Story 3.2 v1), so 90 days covers any subscriber
+# whose failure could still be Active.
+RECOVERY_LOOKBACK_DAYS = 90
+
+
+def _check_payment_recoveries(account, access_token):
+    """Story 3.4 v1 — detect previously-failed PaymentIntents that have since succeeded.
+
+    For each Active subscriber, refetch every recent failure's PaymentIntent. If Stripe
+    now reports `status == "succeeded"`, transition Active → Recovered and (for Mid/Pro
+    accounts with DPA accepted) dispatch the recovery confirmation email per FR25 +
+    Story 4.3.
+    """
+    from core.engine.state_machine import STATUS_ACTIVE
+    from core.models.account import TIER_MID, TIER_PRO
+    from core.models.subscriber import Subscriber, SubscriberFailure
+    from core.tasks.notifications import send_recovery_confirmation
+
+    cutoff = timezone.now() - timedelta(days=RECOVERY_LOOKBACK_DAYS)
+    send_email_eligible = (
+        account.tier in (TIER_MID, TIER_PRO) and account.dpa_accepted
+    )
+
+    active_subscribers = (
+        Subscriber.objects.for_account(account.id)
+        .filter(status=STATUS_ACTIVE)
+        .order_by("id")
+    )
+
+    for subscriber in active_subscribers:
+        # Order ASC by failure_created_at so the OLDEST recovered PI drives
+        # the transition + (one) recovery confirmation email per subscriber.
+        failures = (
+            SubscriberFailure.objects.for_account(account.id)
+            .filter(subscriber=subscriber, failure_created_at__gte=cutoff)
+            .order_by("failure_created_at")
+        )
+
+        for failure in failures:
+            try:
+                pi = stripe.PaymentIntent.retrieve(
+                    failure.payment_intent_id, api_key=access_token,
+                )
+            except stripe.StripeError as exc:
+                logger.warning(
+                    "Failed to retrieve PaymentIntent %s for recovery check: %s",
+                    failure.payment_intent_id, exc,
+                )
+                continue
+
+            if pi.status != "succeeded":
+                continue
+
+            transitioned = False
+            with transaction.atomic():
+                locked = (
+                    Subscriber.objects.for_account(account.id)
+                    .select_for_update()
+                    .get(id=subscriber.id)
+                )
+                if locked.status != STATUS_ACTIVE:
+                    # Concurrent transition (e.g. manual resolve) — bail.
+                    break
+
+                locked.recover()
+                locked.save(update_fields=["status"])
+
+                SubscriberFailure.objects.for_account(account.id).filter(
+                    subscriber=locked, next_retry_at__isnull=False,
+                ).update(next_retry_at=None)
+
+                write_audit_event(
+                    subscriber=str(locked.id),
+                    actor="engine",
+                    action="payment_success_detected",
+                    outcome="success",
+                    metadata={
+                        "payment_intent_id": failure.payment_intent_id,
+                        "failure_id": str(failure.id),
+                        "polling_cycle_at": timezone.now().isoformat(),
+                    },
+                    account=account,
+                )
+
+                if send_email_eligible:
+                    failure_id = failure.id
+                    transaction.on_commit(
+                        lambda fid=failure_id: send_recovery_confirmation.delay(
+                            fid, bypass_engine_active=True,
+                        )
+                    )
+                transitioned = True
+
+            # First successful PI per subscriber drives one transition; bail.
+            if transitioned:
+                break
 
 
 def _detect_card_updates(account, access_token):
